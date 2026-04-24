@@ -77,8 +77,9 @@ Instead of ad-hoc styling, the app uses a centralized token system defined in th
 - `image_key`: String (S3 path/folder per user)
 - `latitude`: Decimal
 - `longitude`: Decimal
-- `status_label`: Enum (e.g., 'fellen', 'zaun', 'markieren')
-- `growth_label`: Enum (e.g., 'klein', 'mittel', 'schlagreif')
+- `status`: Enum, english short ids that will be mapped to german in code. (have a central file in frontend for enum mappings) (e.g., 'dead', 'healthy', 'infected', 'must-watch')
+- `est_planted_at`: date. user can enter either tree age and we will auto-calculate the year to store, or user inputs date directly. based on this year, we can display tree growth stage.
+- `tree_type_id`: Enum, genus of the tree, english short ids that will be mapped to german in code. (e.g. tanne, fichte, kiefer, eiche, ..)
 - `description`: Text
 - `created_at`: Timestamp
 
@@ -91,6 +92,15 @@ Instead of ad-hoc styling, the app uses a centralized token system defined in th
 - `worker_notes`: Text (Feedback from contractor)
 - `status`: Enum (OPEN, IN_PROGRESS, COMPLETED)
 
+### 4.6 Work Order Trees (`work_order_trees`)
+- `id`: UUID (PK)
+- `work_order_id`: UUID (FK to work_orders)
+- `tree_id`: UUID (FK to trees)
+- `status`: enum (OPEN, COMPLETED, NOT_FOUND, PROBLEM)
+- `status_message`: text (individual optional feedback message for the tree)
+
+
+
 ---
 
 ## 5. Core Workflows
@@ -101,7 +111,7 @@ Instead of ad-hoc styling, the app uses a centralized token system defined in th
 2. A map view loads with BayernAtlas data.
 3. **Parcel Selection:** User clicks on specific parcels ("Grundstücke"). Clicking an unselected parcel highlights it; clicking it again removes it.
 4. User optionally names the group and saves.
-5. **Smart Navigation:** The overview map displays one "Waldstück" at a time. Navigation arrows allow the user to cycle through plots, automatically panning the map to the correct coordinates.
+5. **Smart Navigation:** The overview map displays one "Waldstück" (can contain multiple parcels, zoom out accordingly to show them all perfectly fit) at a time. Navigation arrows allow the user to cycle through plots, automatically panning the map to the correct coordinates.
 
 ### 5.2 Access Routes ("Anfahrt")
 
