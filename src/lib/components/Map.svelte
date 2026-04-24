@@ -27,22 +27,38 @@
   let containerEl: HTMLDivElement;
   let map = $state<MLMap | null>(null);
 
-  // Base map: BayernAtlas DOP satellite imagery (§6.1). The open-data WMS
-  // endpoint is public and CORS-enabled, so MapLibre fetches tiles directly.
-  // The URL can be overridden via VITE_BAYERN_WMS_SATELLITE for mirrors or
-  // authenticated instances; the default hits the LDBV open-data service.
-  const bayernWms =
-    import.meta.env.VITE_BAYERN_WMS_SATELLITE ||
-    'https://geoservices.bayern.de/od/wms/dop/v1/dop40';
+  // BayernAtlas via WMTS (§6.1). The open-data WMTS at bayernwolke.de is
+  // CDN-cached, daily-refreshed, and CORS-open (`*`) — much snappier than
+  // the on-demand WMS. We use:
+  //   - `by_dop`   = DOP satellite imagery (JPEG tiles)
+  //   - `by_label` = labels + ALKIS-Parzellarkarte (incl. Flurstücksnummern)
+  //                  at higher zoom levels, rendered as a transparent PNG
+  //                  overlay on top of the satellite base.
+  // Subdomain rotation (1–3) spreads requests across the tile cluster.
+  const dopTiles = [1, 2, 3].map(
+    (i) => `https://wmtsod${i}.bayernwolke.de/wmts/by_dop/smerc/{z}/{x}/{y}`
+  );
+  const labelTiles = [1, 2, 3].map(
+    (i) => `https://wmtsod${i}.bayernwolke.de/wmts/by_label/smerc/{z}/{x}/{y}`
+  );
+
+  // bayernwolke's smerc matrix set tops out at zoom 19 — requesting z=20+
+  // yields HTTP 400. Capping `maxzoom` makes MapLibre over-zoom from 19
+  // (stretching the last level's pixels) instead of issuing 400s.
   const rasterSources = {
     base: {
       type: 'raster' as const,
-      tiles: [
-        // DOP40 advertises WMS 1.1.1 — use srs= (not crs=) and minx,miny,maxx,maxy order.
-        `${bayernWms}?service=WMS&request=GetMap&version=1.1.1&layers=by_dop40c&styles=&srs=EPSG:3857&format=image/png&transparent=false&width=256&height=256&bbox={bbox-epsg-3857}`
-      ],
+      tiles: dopTiles,
       tileSize: 256,
+      maxzoom: 19,
       attribution: '© GeoBasis-DE / BKG / LDBV Bayern'
+    },
+    parzellarkarte: {
+      type: 'raster' as const,
+      tiles: labelTiles,
+      tileSize: 256,
+      maxzoom: 19,
+      attribution: '© LDBV Bayern — ALKIS-Parzellarkarte (CC BY-ND 4.0)'
     }
   };
 
@@ -52,7 +68,16 @@
       style: {
         version: 8,
         sources: rasterSources,
-        layers: [{ id: 'base', type: 'raster', source: 'base' }],
+        // The Parzellarkarte+labels overlay sits on top of the DOP base so
+        // Flurstück outlines and Flurstücksnummern are always visible at
+        // higher zoom levels per §5.2/§6.1. The label layer is transparent
+        // at low zoom, so leaving it on everywhere is cheap — no minzoom
+        // gate needed. Downstream layers (parcels, trees, routes) are
+        // inserted above both by the pages that own them.
+        layers: [
+          { id: 'base', type: 'raster', source: 'base' },
+          { id: 'parzellarkarte', type: 'raster', source: 'parzellarkarte' }
+        ],
         glyphs: 'https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf'
       },
       center: initialCenter,

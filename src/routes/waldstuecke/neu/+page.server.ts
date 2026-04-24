@@ -1,7 +1,8 @@
 import { redirect, fail } from '@sveltejs/kit';
 import type { Actions, PageServerLoad } from './$types';
 import { db } from '$lib/server/db';
-import { forestPlots, forestPlotParcels } from '$lib/server/db/schema';
+import { forestPlots, forestPlotParcels, parcels } from '$lib/server/db/schema';
+import { sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { resolveParcelIds } from '$lib/server/bayernatlas';
 
@@ -10,12 +11,32 @@ export const load: PageServerLoad = async ({ locals }) => {
   return {};
 };
 
-const schema = z.object({
-  name: z.string().trim().max(120).optional(),
-  // The client only sends cadastralIds — geometries live in the parcels cache,
-  // which was populated by `parcelsInBbox` as the user explored the map.
-  cadastralIds: z.array(z.string().min(1)).min(1, 'Mindestens ein Flurstück auswählen.')
-});
+// Two channels of selection are accepted:
+//   1. `cadastralIds` — real ALKIS parcels already in the `parcels` cache
+//      (populated via the LDBV WFS when credentials are configured).
+//   2. `manualParcels` — polygons the user traced over the raster overlay
+//      when the WFS is unreachable. These are persisted with a synthetic
+//      `manual:<uuid>` cadastral_id so they coexist with real cache rows
+//      under the same UNIQUE(cadastral_id) constraint.
+const schema = z
+  .object({
+    name: z.string().trim().max(120).optional(),
+    cadastralIds: z.array(z.string().min(1)).default([]),
+    manualParcels: z
+      .array(
+        z.object({
+          geometry: z.object({
+            type: z.literal('Polygon'),
+            coordinates: z.array(z.array(z.tuple([z.number(), z.number()])))
+          })
+        })
+      )
+      .default([])
+  })
+  .refine(
+    (v) => v.cadastralIds.length + v.manualParcels.length >= 1,
+    { message: 'Mindestens ein Flurstück auswählen oder zeichnen.' }
+  );
 
 export const actions: Actions = {
   default: async ({ request, locals }) => {
@@ -32,11 +53,14 @@ export const actions: Actions = {
       return fail(400, { error: err instanceof z.ZodError ? err.errors[0].message : 'Ungültige Eingabe.' });
     }
 
+    // Resolve real ALKIS parcels from the cache.
     const ids = Array.from(new Set(parsed.cadastralIds));
     const resolved = await resolveParcelIds(ids);
     const missing = ids.filter((id) => !resolved.has(id));
     if (missing.length > 0) {
-      return fail(400, { error: `Flurstück${missing.length === 1 ? '' : 'e'} ${missing.join(', ')} nicht im Cache. Bitte Karte neu laden.` });
+      return fail(400, {
+        error: `Flurstück${missing.length === 1 ? '' : 'e'} ${missing.join(', ')} nicht im Cache. Bitte Karte neu laden.`
+      });
     }
 
     const [plot] = await db
@@ -44,9 +68,27 @@ export const actions: Actions = {
       .values({ ownerId: locals.user.id, name: parsed.name || null })
       .returning({ id: forestPlots.id });
 
+    const linkParcelIds: string[] = Array.from(resolved.values());
+
+    // Manual-drawn polygons: upsert into `parcels` with synthetic cadastral_id.
+    for (const m of parsed.manualParcels) {
+      const synthetic = `manual:${crypto.randomUUID()}`;
+      const [row] = await db
+        .insert(parcels)
+        .values({
+          cadastralId: synthetic,
+          gemarkung: null,
+          municipality: null,
+          areaSqm: null,
+          geometry: sql`ST_SetSRID(ST_GeomFromGeoJSON(${JSON.stringify(m.geometry)}), 4326)` as unknown as string
+        })
+        .returning({ id: parcels.id });
+      linkParcelIds.push(row.id);
+    }
+
     await db
       .insert(forestPlotParcels)
-      .values(ids.map((cid) => ({ plotId: plot.id, parcelId: resolved.get(cid)! })));
+      .values(linkParcelIds.map((parcelId) => ({ plotId: plot.id, parcelId })));
 
     throw redirect(303, `/?plot=${plot.id}`);
   }
