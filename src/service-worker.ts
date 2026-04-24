@@ -9,7 +9,6 @@ import { build, files, version } from '$service-worker';
 const sw = self as unknown as ServiceWorkerGlobalScope;
 
 const APP_CACHE = `app-${version}`;
-const TILE_CACHE = `tiles-v2`; // bumped when the base-map tile URL scheme changed
 
 const APP_ASSETS = [...build, ...files];
 
@@ -28,10 +27,10 @@ sw.addEventListener('activate', (event) => {
     (async () => {
       const keys = await caches.keys();
       for (const key of keys) {
-        // Drop the current APP_CACHE siblings and any stale tile caches that
-        // aren't the active TILE_CACHE — bumping TILE_CACHE's suffix is the
-        // trigger when the base-map URL scheme changes.
-        if (key !== APP_CACHE && key !== TILE_CACHE) await caches.delete(key);
+        // Drop everything but the current app cache. The former tile caches
+        // (tiles-v1/tiles-v2) are deliberately purged — tile requests now
+        // bypass the SW entirely, so the cache no longer needs to exist.
+        if (key !== APP_CACHE) await caches.delete(key);
       }
       await sw.clients.claim();
     })()
@@ -44,27 +43,14 @@ sw.addEventListener('fetch', (event) => {
 
   const url = new URL(req.url);
 
-  // Map tiles — cache-first, fallback to network. We only intercept tile
-  // requests that carry WMS GetMap / XYZ-style signatures so the SW doesn't
-  // accidentally swallow app-level requests (e.g. the WFS remote call).
-  const isMapTile =
-    url.hostname.includes('tile.openstreetmap.org') ||
-    (url.hostname.includes('geoservices.bayern.de') && /request=GetMap/i.test(url.search));
-  if (isMapTile) {
-    event.respondWith(
-      (async () => {
-        const cache = await caches.open(TILE_CACHE);
-        const hit = await cache.match(req);
-        if (hit) return hit;
-        // On miss, go to network. Any error propagates — respondWith must
-        // resolve to a Response, so we never return undefined here.
-        const res = await fetch(req);
-        if (res.ok) cache.put(req, res.clone()).catch(() => {});
-        return res;
-      })()
-    );
-    return;
-  }
+  // Deliberately do NOT intercept cross-origin map-tile requests. MapLibre
+  // loads tiles with `crossOrigin='anonymous'`, and re-issuing that through
+  // the SW's `fetch()` in Firefox surfaces as a CORS failure even when the
+  // upstream sends valid CORS headers — opaque-response handling inside the
+  // SW doesn't round-trip for WebGL textures. The browser handles tile
+  // loads correctly when the SW stays out of the way. We rely on the HTTP
+  // cache for repeat requests and revisit offline tile caching via a
+  // separate, opt-in "Kartenausschnitt offline speichern" flow later.
 
   // App shell — cache-first for build/static assets.
   if (APP_ASSETS.includes(url.pathname)) {
