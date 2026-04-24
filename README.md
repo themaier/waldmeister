@@ -167,7 +167,7 @@ Instead of ad-hoc styling, the app uses a centralized token system defined in th
 | Infrastructure | Accept / Redo               | Übernehmen / Wiederholen                         |
 | Inventory      | Add Tree                    | Baum hinzufügen                                  |
 | Inventory      | Retake Coordinates          | Koordinaten erneut erfassen                      |
-| Tree Labels    | Cut down / Mark / Fence     | Fällen / Markieren / Zaun bauen                  |
+| Tree Labels    | Cut down / Mark / Fence     | Fällen / Markieren / Zaun bauen / Entasten       |
 | Tree Maturity  | Harvest Ready               | Schlagreif                                       |
 | Operations     | Work Order                  | Arbeitsauftrag                                   |
 | Contractor     | Done / Problems / Not found | Erledigt / Probleme aufgetreten / Nicht gefunden |
