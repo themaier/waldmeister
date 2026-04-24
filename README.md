@@ -74,7 +74,7 @@ Instead of ad-hoc styling, the app uses a centralized token system defined in th
 
 - `id`: UUID (PK)
 - `plot_id`: UUID (FK to forest_plots)
-- `image_key`: String (S3 path/folder per user)
+- `image_keys`: List[Text] (multiple S3 paths per user)
 - `latitude`: Decimal
 - `longitude`: Decimal
 - `status`: Enum, english short ids that will be mapped to german in code. (have a central file in frontend for enum mappings) (e.g., 'dead', 'healthy', 'infected', 'must-watch')
@@ -93,13 +93,12 @@ Instead of ad-hoc styling, the app uses a centralized token system defined in th
 - `status`: Enum (OPEN, IN_PROGRESS, COMPLETED)
 
 ### 4.6 Work Order Trees (`work_order_trees`)
+
 - `id`: UUID (PK)
 - `work_order_id`: UUID (FK to work_orders)
 - `tree_id`: UUID (FK to trees)
 - `status`: enum (OPEN, COMPLETED, NOT_FOUND, PROBLEM)
 - `status_message`: text (individual optional feedback message for the tree)
-
-
 
 ---
 
