@@ -82,6 +82,7 @@
       },
       center: initialCenter,
       zoom: initialZoom,
+      maxZoom: 19,
       attributionControl: { compact: true }
     });
 

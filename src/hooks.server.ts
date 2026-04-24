@@ -1,5 +1,6 @@
 import type { Handle } from '@sveltejs/kit';
 import { auth } from '$lib/server/auth';
+import { ensureDefaultPlotForUser } from '$lib/server/default-plot';
 // Side-effect import: registers every SSE topic exactly once at server boot.
 import '$lib/server/sse-topics';
 
@@ -23,6 +24,7 @@ export const handle: Handle = async ({ event, resolve }) => {
       id: session.session.id,
       expiresAt: new Date(session.session.expiresAt)
     };
+    await ensureDefaultPlotForUser(session.user.id);
   } else {
     event.locals.user = null;
     event.locals.session = null;

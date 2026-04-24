@@ -4,15 +4,15 @@
   // camera rather than navigating routes.
 
   import { goto } from '$app/navigation';
-  import { onMount } from 'svelte';
   import Map from '$lib/components/Map.svelte';
   import PlotSwitcher from '$lib/components/PlotSwitcher.svelte';
   import OnboardingCard from '$lib/components/OnboardingCard.svelte';
   import { boundsOfPolygons, shouldFlyTo } from '$lib/geo';
-  import { Plus, Crosshair, X, Gear } from 'phosphor-svelte';
+  import { Plus, Crosshair, X, Gear, Tree, Calculator } from 'phosphor-svelte';
   import type { PageData } from './$types';
   import maplibregl from 'maplibre-gl';
   import { getPlotOverview } from './trees.remote';
+  import { officialTreeDotsForPlot } from './plots.remote';
 
   let { data }: { data: PageData & { plots: any[]; parcels: any[] } } = $props();
 
@@ -30,6 +30,15 @@
   let tapToast = $state<{ targetPlotId: string } | null>(null);
   let treesForActive = $state<any[]>([]);
   let routesForActive = $state<any[]>([]);
+  // Official Bayern Einzelbäume points are loaded on demand for the active
+  // plot only (never the whole region). `officialTreeDots` is the cache for
+  // the *currently active* plot — it gets cleared whenever the plot changes.
+  let officialTreeDots = $state<any[]>([]);
+  let officialTreesVisible = $state(false);
+  let officialTreesLoading = $state(false);
+  let treeCountLoading = $state(false);
+  let treeCountResult = $state<number | null>(null);
+  let treeActionError = $state<string | null>(null);
   let lastBounds = $state<[[number, number], [number, number]] | null>(null);
 
   const activePlot = $derived(data.plots.find((p) => p.id === activePlotId));
@@ -45,7 +54,10 @@
   let layersInitialized = false;
 
   function ensureSources(map: maplibregl.Map) {
-    if (map.getSource('parcels')) return;
+    if (map.getSource('parcels')) {
+      layersInitialized = true;
+      return;
+    }
 
     map.addSource('parcels', {
       type: 'geojson',
@@ -76,7 +88,7 @@
         'line-color': [
           'case',
           ['==', ['get', 'isActive'], true],
-          '#1f3d2c',
+          '#f97316',
           ['==', ['get', 'isOwned'], true],
           '#5d7a4a',
           'rgba(255,255,255,0.55)'
@@ -84,7 +96,7 @@
         'line-width': [
           'case',
           ['==', ['get', 'isActive'], true],
-          3,
+          4,
           ['==', ['get', 'isOwned'], true],
           2,
           1
@@ -146,6 +158,25 @@
       }
     });
 
+    // Official Einzelbäume points for the active Waldstück. We never load
+    // the regional dataset wholesale — the source only ever holds the dots
+    // that fall inside the currently-selected plot. Hidden until the user
+    // toggles it on so we don't pay the fetch on every plot switch.
+    map.addSource('official-trees', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+    map.addLayer({
+      id: 'official-trees',
+      type: 'circle',
+      source: 'official-trees',
+      layout: { visibility: 'none' },
+      paint: {
+        'circle-radius': 3.5,
+        'circle-color': '#d4a23c',
+        'circle-opacity': 0.9,
+        'circle-stroke-color': '#132318',
+        'circle-stroke-width': 0.75
+      }
+    });
+
     // Routes layer (Anfahrten + Rückegassen)
     // MapLibre does not support data expressions for line-dasharray, so split
     // into two layers sharing one source and filter by routeType.
@@ -201,6 +232,31 @@
     source.setData({ type: 'FeatureCollection', features });
   }
 
+  function updateOfficialTreeFeatures() {
+    if (!mlMap || !layersInitialized) return;
+    const source = mlMap.getSource('official-trees') as maplibregl.GeoJSONSource | undefined;
+    if (!source) return;
+    source.setData({
+      type: 'FeatureCollection',
+      features: officialTreeDots.map((tree) => ({
+        type: 'Feature',
+        id: tree.id,
+        geometry: { type: 'Point', coordinates: [Number(tree.longitude), Number(tree.latitude)] },
+        properties: { heightM: tree.heightM }
+      }))
+    });
+    mlMap.setLayoutProperty('official-trees', 'visibility', officialTreesVisible ? 'visible' : 'none');
+  }
+
+  async function ensureDotsForActivePlot(): Promise<number> {
+    if (!activePlotId) return 0;
+    if (officialTreeDots.length > 0) return officialTreeDots.length;
+    const result = await officialTreeDotsForPlot(activePlotId).run();
+    officialTreeDots = result.dots;
+    updateOfficialTreeFeatures();
+    return officialTreeDots.length;
+  }
+
   async function loadActivePlotLayers(plotId: string | null) {
     if (!plotId) {
       treesForActive = [];
@@ -214,6 +270,12 @@
         /* non-fatal: leave layers empty on error */
       }
     }
+    // Reset official-tree state on every plot switch — the cached dots
+    // belong to the *previous* plot and must not leak across.
+    officialTreeDots = [];
+    officialTreesVisible = false;
+    treeCountResult = null;
+    treeActionError = null;
     if (!mlMap || !layersInitialized) return;
     (mlMap.getSource('trees') as maplibregl.GeoJSONSource | undefined)?.setData({
       type: 'FeatureCollection',
@@ -233,6 +295,43 @@
         properties: { routeId: r.id, routeType: r.routeType, vehicleType: r.vehicleType }
       }))
     });
+    updateOfficialTreeFeatures();
+  }
+
+  async function toggleOfficialTrees() {
+    if (!activePlotId || officialTreesLoading) return;
+    treeActionError = null;
+    if (officialTreesVisible) {
+      officialTreesVisible = false;
+      updateOfficialTreeFeatures();
+      return;
+    }
+    officialTreesLoading = true;
+    try {
+      const count = await ensureDotsForActivePlot();
+      officialTreesVisible = true;
+      updateOfficialTreeFeatures();
+      if (count === 0) {
+        treeActionError = 'Keine offiziellen Baum-Punkte für dieses Waldstück gefunden.';
+      }
+    } catch (e) {
+      treeActionError = e instanceof Error ? e.message : 'Baum-Overlay fehlgeschlagen.';
+    } finally {
+      officialTreesLoading = false;
+    }
+  }
+
+  async function countOfficialTrees() {
+    if (!activePlotId || treeCountLoading) return;
+    treeCountLoading = true;
+    treeActionError = null;
+    try {
+      treeCountResult = await ensureDotsForActivePlot();
+    } catch (e) {
+      treeActionError = e instanceof Error ? e.message : 'Baumzählung fehlgeschlagen.';
+    } finally {
+      treeCountLoading = false;
+    }
   }
 
   function fitToPlot(plotId: string) {
@@ -242,10 +341,21 @@
       .map((p) => p.geometry);
     const b = boundsOfPolygons(polys);
     if (!b) return;
-    if (shouldFlyTo(lastBounds, b)) {
-      mapRef.flyTo([(b[0][0] + b[1][0]) / 2, (b[0][1] + b[1][1]) / 2], 14);
+    // Tight framing: ~6 % of the viewport on each side so the parcel "just
+    // barely fits" — feels right on phones and still leaves room for the
+    // floating action stack. We derive the target zoom from `cameraForBounds`
+    // so a long-distance fly-to lands at the same framing as a local fit.
+    const padding = Math.max(16, Math.round(Math.min(window.innerWidth, window.innerHeight) * 0.06));
+    if (shouldFlyTo(lastBounds, b) && mlMap) {
+      const cam = mlMap.cameraForBounds(b, { padding });
+      if (cam?.center && cam.zoom != null) {
+        const c = maplibregl.LngLat.convert(cam.center);
+        mapRef.flyTo([c.lng, c.lat], Math.min(cam.zoom, 18));
+      } else {
+        mapRef.fitBounds(b, { padding });
+      }
     } else {
-      mapRef.fitBounds(b, { padding: 80 });
+      mapRef.fitBounds(b, { padding });
     }
     lastBounds = b;
   }
@@ -404,6 +514,37 @@
             <Gear size="1.125em" />
             <span>Verwalten</span>
           </a>
+          {#if treeActionError}
+            <div class="max-w-[18rem] rounded-btn bg-surface/95 border px-3 py-2 text-xs text-crimson shadow-understory">
+              {treeActionError}
+            </div>
+          {/if}
+          {#if treeCountResult != null}
+            <div class="max-w-[18rem] rounded-btn bg-surface/95 border px-3 py-2 text-xs text-content shadow-understory">
+              Offiziell gezählt: <strong>{treeCountResult}</strong> Bäume
+            </div>
+          {/if}
+          <button
+            class="inline-flex items-center gap-2 px-4 py-3 min-h-[46px] rounded-pill text-ink border bg-surface/90 backdrop-blur font-semibold text-sm shadow-understory transition hover:-translate-y-px hover:shadow-canopy active:translate-y-0"
+            aria-pressed={officialTreesVisible}
+            onclick={toggleOfficialTrees}
+          >
+            <Tree size="1.125em" />
+            <span>
+              {officialTreesLoading
+                ? 'Lade Baum-Punkte…'
+                : officialTreesVisible
+                  ? 'Baum-Punkte ausblenden'
+                  : 'Baum-Punkte anzeigen'}
+            </span>
+          </button>
+          <button
+            class="inline-flex items-center gap-2 px-4 py-3 min-h-[46px] rounded-pill text-ink border bg-surface/90 backdrop-blur font-semibold text-sm shadow-understory transition hover:-translate-y-px hover:shadow-canopy active:translate-y-0"
+            onclick={countOfficialTrees}
+          >
+            <Calculator size="1.125em" />
+            <span>{treeCountLoading ? 'Zähle Bäume…' : 'Bäume zählen'}</span>
+          </button>
           <button
             class="inline-flex items-center gap-2 px-4 py-3 min-h-[46px] rounded-pill text-ink border bg-surface/90 backdrop-blur font-semibold text-sm shadow-understory transition hover:-translate-y-px hover:shadow-canopy active:translate-y-0"
             onclick={startPlacement}
