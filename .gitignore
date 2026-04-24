@@ -1,5 +1,6 @@
 node_modules
 /.svelte-kit
+.cache/
 /build
 /dist
 .env
@@ -11,3 +12,4 @@ bun.lockb.bak
 /caddy_data
 /caddy_config
 /pgdata
+.cache/
