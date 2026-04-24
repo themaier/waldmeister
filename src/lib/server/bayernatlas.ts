@@ -13,7 +13,7 @@
 import { env } from '$env/dynamic/private';
 import { db } from './db';
 import { parcels } from './db/schema';
-import { sql } from 'drizzle-orm';
+import { inArray, sql } from 'drizzle-orm';
 
 // Flurstück WFS endpoint. The LDBV "ALKIS-vereinfacht" WFS lives at
 // https://geoservices.bayern.de/wfs/v1/ogc_alkis_ave.cgi and requires HTTP
@@ -220,10 +220,9 @@ export async function listParcelsInBbox(bbox: Bbox): Promise<Array<{
  */
 export async function resolveParcelIds(cadastralIds: string[]): Promise<Map<string, string>> {
   if (cadastralIds.length === 0) return new Map();
-  const rows = await db.execute<{ id: string; cadastral_id: string }>(sql`
-    SELECT id::text AS id, cadastral_id
-    FROM parcels
-    WHERE cadastral_id = ANY(${cadastralIds}::text[])
-  `);
-  return new Map(rows.map((r) => [r.cadastral_id, r.id]));
+  const rows = await db
+    .select({ id: parcels.id, cadastralId: parcels.cadastralId })
+    .from(parcels)
+    .where(inArray(parcels.cadastralId, cadastralIds));
+  return new Map(rows.map((r) => [r.cadastralId, r.id]));
 }
