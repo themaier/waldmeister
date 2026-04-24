@@ -1,0 +1,14 @@
+.git
+.svelte-kit
+build
+node_modules
+.env
+.env.*
+!.env.example
+Dockerfile
+docker-compose.yml
+Caddyfile
+caddy_data
+caddy_config
+pgdata
+README.md

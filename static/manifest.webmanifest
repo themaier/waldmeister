@@ -1,0 +1,20 @@
+{
+  "name": "Waldmeister",
+  "short_name": "Waldmeister",
+  "description": "Digitale Waldverwaltung.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#f5f1e6",
+  "theme_color": "#1f3d2c",
+  "lang": "de",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

@@ -1,0 +1,36 @@
+# Waldmeister — Caddy reverse proxy
+#
+# Automatic HTTPS: Caddy will request a Let's Encrypt certificate for {$DOMAIN}
+# on first boot. Ports 80/443 must be reachable from the public internet.
+#
+# SSE note: `flush_interval -1` disables response buffering so Server-Sent
+# Events from /api/sse/* are delivered to the browser in real time.
+
+{
+	email {$ACME_EMAIL}
+	# Enable this during development with a local domain:
+	# auto_https disable_redirects
+}
+
+{$DOMAIN} {
+	encode gzip zstd
+
+	# Security headers
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+		X-Content-Type-Options nosniff
+		Referrer-Policy strict-origin-when-cross-origin
+		Permissions-Policy "camera=(self), geolocation=(self)"
+		# Cross-origin-opener is handy for future popup-based OAuth flows.
+		Cross-Origin-Opener-Policy same-origin
+	}
+
+	# Everything goes to the SvelteKit app.
+	reverse_proxy app:3000 {
+		header_up X-Real-IP {remote_host}
+		header_up X-Forwarded-For {remote_host}
+		header_up X-Forwarded-Proto {scheme}
+		# Disable response buffering for SSE streams.
+		flush_interval -1
+	}
+}

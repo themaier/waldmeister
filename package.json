@@ -1,0 +1,51 @@
+{
+  "name": "waldmeister",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite dev --host",
+    "build": "vite build",
+    "preview": "vite preview",
+    "start": "bun run build/index.js",
+    "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
+    "check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
+    "env:init": "bun ./scripts/env-init.ts",
+    "db:up": "docker compose -f docker-compose.dev.yml up -d",
+    "db:down": "docker compose -f docker-compose.dev.yml down",
+    "db:logs": "docker compose -f docker-compose.dev.yml logs -f db",
+    "db:reset": "docker compose -f docker-compose.dev.yml down -v && docker compose -f docker-compose.dev.yml up -d",
+    "db:wait": "bun --env-file=.env ./scripts/wait-for-db.ts",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "bun --env-file=.env ./scripts/migrate.ts",
+    "db:push": "bun --env-file=.env drizzle-kit push",
+    "db:studio": "bun --env-file=.env drizzle-kit studio",
+    "db:seed": "bun --env-file=.env ./scripts/seed.ts",
+    "setup": "bun run env:init && bun run db:up && bun run db:wait && bun run db:migrate"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.660.0",
+    "@aws-sdk/s3-request-presigner": "^3.660.0",
+    "better-auth": "^1.1.0",
+    "drizzle-orm": "^0.36.0",
+    "maplibre-gl": "^4.7.0",
+    "nodemailer": "^6.9.15",
+    "phosphor-svelte": "^3.0.0",
+    "postgres": "^3.4.4",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@sveltejs/kit": "^2.8.0",
+    "@sveltejs/vite-plugin-svelte": "^4.0.0",
+    "@tailwindcss/vite": "^4.0.0",
+    "@types/nodemailer": "^6.4.16",
+    "daisyui": "^5.0.0",
+    "drizzle-kit": "^0.28.0",
+    "svelte": "^5.1.0",
+    "svelte-adapter-bun": "^0.5.2",
+    "svelte-check": "^4.0.5",
+    "tailwindcss": "^4.0.0",
+    "typescript": "^5.6.3",
+    "vite": "^5.4.10"
+  }
+}

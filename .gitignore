@@ -1,0 +1,13 @@
+node_modules
+/.svelte-kit
+/build
+/dist
+.env
+.env.*
+!.env.example
+bun.lockb.bak
+*.log
+.DS_Store
+/caddy_data
+/caddy_config
+/pgdata

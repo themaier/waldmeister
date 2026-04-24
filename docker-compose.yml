@@ -1,0 +1,57 @@
+# Waldmeister — production compose for a single VPS.
+# Caddy terminates TLS (automatic Let's Encrypt) and proxies to the app.
+# Postgres uses the postgis image so spatial columns work out of the box.
+
+services:
+  db:
+    image: postgis/postgis:16-3.4-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: waldmeister
+      POSTGRES_PASSWORD: waldmeister
+      POSTGRES_DB: waldmeister
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U waldmeister -d waldmeister']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    # Not exposed to the host by default — the app talks to it over the internal network.
+
+  app:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      # Override for in-compose networking; `.env` supplies all secrets.
+      DATABASE_URL: postgres://waldmeister:waldmeister@db:5432/waldmeister
+      ORIGIN: https://${DOMAIN}
+      BETTER_AUTH_URL: https://${DOMAIN}
+    expose:
+      - '3000'
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - '80:80'
+      - '443:443'
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    environment:
+      DOMAIN: ${DOMAIN}
+      ACME_EMAIL: ${ACME_EMAIL}
+    depends_on:
+      - app
+
+volumes:
+  pgdata:
+  caddy_data:
+  caddy_config:

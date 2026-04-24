@@ -1,0 +1,32 @@
+import type { Handle } from '@sveltejs/kit';
+import { auth } from '$lib/server/auth';
+// Side-effect import: registers every SSE topic exactly once at server boot.
+import '$lib/server/sse-topics';
+
+// Expose `event.locals.user` + `event.locals.session` on every request, and
+// forward every request that starts with /api/auth/* to better-auth's handler.
+
+export const handle: Handle = async ({ event, resolve }) => {
+  const url = event.url;
+  if (url.pathname.startsWith('/api/auth')) {
+    return auth.handler(event.request);
+  }
+
+  const session = await auth.api.getSession({ headers: event.request.headers });
+  if (session) {
+    event.locals.user = {
+      id: session.user.id,
+      email: session.user.email,
+      name: session.user.name
+    };
+    event.locals.session = {
+      id: session.session.id,
+      expiresAt: new Date(session.session.expiresAt)
+    };
+  } else {
+    event.locals.user = null;
+    event.locals.session = null;
+  }
+
+  return resolve(event);
+};

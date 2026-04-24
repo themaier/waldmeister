@@ -1,0 +1,31 @@
+# Dev compose — spins up Postgres + PostGIS only.
+# The SvelteKit app runs on the host (bun run dev) and talks to localhost:5432.
+#
+# Usage:
+#   bun run db:up        # start the DB in the background
+#   bun run db:migrate   # apply SQL migrations
+#   bun run dev          # start the Vite dev server
+#
+# Named volume keeps data across restarts; `bun run db:reset` wipes it.
+
+services:
+  db:
+    image: postgis/postgis:16-3.4-alpine
+    container_name: waldmeister-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: waldmeister
+      POSTGRES_PASSWORD: waldmeister
+      POSTGRES_DB: waldmeister
+    ports:
+      - '5432:5432'
+    volumes:
+      - pgdata_dev:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U waldmeister -d waldmeister']
+      interval: 3s
+      timeout: 3s
+      retries: 30
+
+volumes:
+  pgdata_dev:
