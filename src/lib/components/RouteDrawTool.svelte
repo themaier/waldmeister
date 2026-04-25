@@ -12,7 +12,7 @@
   // shared MapLibre instance so the line is visible *under* this overlay.
   // On unmount, it cleans the layer and re-enables map gestures.
   import maplibregl from "maplibre-gl";
-  import { untrack } from "svelte";
+  import { onDestroy, untrack } from "svelte";
   import { X, Check, ArrowCounterClockwise } from "phosphor-svelte";
   import {
     ROUTE_TYPE_LABELS,
@@ -216,43 +216,46 @@
     updatePreview();
   }
 
-  $effect(() => {
-    canvas = mlMap.getCanvasContainer();
-    ensureLayer();
-    // Lock pan/zoom so freehand strokes don't slide the map (§6.2).
-    const handlers = [
-      mlMap.dragPan,
-      mlMap.scrollZoom,
-      mlMap.doubleClickZoom,
-      mlMap.touchZoomRotate,
-      mlMap.boxZoom,
-      mlMap.dragRotate,
-    ];
-    for (const h of handlers) h.disable();
+  // Lock the map and claim pointer events synchronously during component
+  // setup — *not* inside `$effect`. `$effect` runs in a microtask after the
+  // DOM is committed, leaving a brief window in which MapLibre's dragPan can
+  // still grab the very first pointer event ("the map moves instead of the
+  // path being drawn"). Doing this in script-top guarantees the lock is in
+  // place before any user input can reach the canvas.
+  canvas = mlMap.getCanvasContainer();
+  ensureLayer();
+  const gestureHandlers = [
+    mlMap.dragPan,
+    mlMap.scrollZoom,
+    mlMap.doubleClickZoom,
+    mlMap.touchZoomRotate,
+    mlMap.boxZoom,
+    mlMap.dragRotate,
+  ];
+  for (const h of gestureHandlers) h.disable();
 
-    // On touch devices the canvas container ships with `touch-action: pan-x
-    // pan-y` (so the browser can pan/zoom the map). That same setting makes
-    // the browser claim our finger gesture for scrolling, firing
-    // `pointercancel` after the very first event — which is why drawing
-    // "only places a dot" in mobile emulation. Disable browser-handled
-    // gestures while the tool is mounted; restore on teardown.
-    const prevTouchAction = canvas.style.touchAction;
-    canvas.style.touchAction = "none";
+  // On touch devices the canvas container ships with `touch-action: pan-x
+  // pan-y` (so the browser can pan/zoom the map). That same setting makes
+  // the browser claim our finger gesture for scrolling, firing
+  // `pointercancel` after the very first event — which is why drawing
+  // "only places a dot" in mobile emulation. Disable browser-handled
+  // gestures while the tool is mounted; restore on teardown.
+  const prevTouchAction = canvas.style.touchAction;
+  canvas.style.touchAction = "none";
 
-    canvas.addEventListener("pointerdown", onPointerDown);
-    canvas.addEventListener("pointermove", onPointerMove);
-    canvas.addEventListener("pointerup", onPointerUp);
-    canvas.addEventListener("pointercancel", onPointerUp);
+  canvas.addEventListener("pointerdown", onPointerDown);
+  canvas.addEventListener("pointermove", onPointerMove);
+  canvas.addEventListener("pointerup", onPointerUp);
+  canvas.addEventListener("pointercancel", onPointerUp);
 
-    return () => {
-      canvas?.removeEventListener("pointerdown", onPointerDown);
-      canvas?.removeEventListener("pointermove", onPointerMove);
-      canvas?.removeEventListener("pointerup", onPointerUp);
-      canvas?.removeEventListener("pointercancel", onPointerUp);
-      if (canvas) canvas.style.touchAction = prevTouchAction;
-      for (const h of handlers) h.enable();
-      clearPreview();
-    };
+  onDestroy(() => {
+    canvas?.removeEventListener("pointerdown", onPointerDown);
+    canvas?.removeEventListener("pointermove", onPointerMove);
+    canvas?.removeEventListener("pointerup", onPointerUp);
+    canvas?.removeEventListener("pointercancel", onPointerUp);
+    if (canvas) canvas.style.touchAction = prevTouchAction;
+    for (const h of gestureHandlers) h.enable();
+    clearPreview();
   });
 
   $effect(() => {

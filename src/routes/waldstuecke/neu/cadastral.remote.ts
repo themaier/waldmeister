@@ -81,10 +81,8 @@ export const traceParcelAt = command('unchecked', async (raw: unknown) => {
     ring = await tracePolygonAt(lng, lat);
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    console.error('[traceParcelAt] tracePolygonAt threw:', e);
     throw error(422, msg);
   }
-  console.log('[traceParcelAt] ring length=', ring.length);
   if (ring.length < 4) throw error(422, 'Parzelle konnte nicht erkannt werden.');
 
   const geometry: GeoJSON.Polygon = { type: 'Polygon', coordinates: [ring] };

@@ -1100,11 +1100,11 @@
             <span class="relative grid place-items-center">
               <TreeEvergreen size="1.75em" weight="fill" />
               <span
-                class="absolute grid place-items-center w-4 h-4 rounded-full"
-                style="top: 0; right: 0; transform: translate(40%, -40%); background: var(--color-pine);"
+                class="absolute grid place-items-center"
+                style="top: 0; right: 0; transform: translate(40%, -40%);"
                 aria-hidden="true"
               >
-                <Plus size="0.7em" weight="bold" />
+                <Plus size="0.8em" weight="bold" />
               </span>
             </span>
           </button>
