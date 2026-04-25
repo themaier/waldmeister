@@ -2,20 +2,23 @@
 //
 // The `by_label` WMTS layer renders parcel outlines (dotted/dashed reddish
 // lines) and Flurstücksnummern on a transparent background. Given a click
-// point, we download a 7×7 window of tiles at zoom 19, build a binary mask
-// of line pixels, dilate to close gaps between the dots, flood-fill the
-// interior region from the click point, trace the region's outer contour
-// with the Moore-neighbour algorithm, and simplify with Douglas–Peucker
-// to keep only the polygon corners.
+// point, we download a (2·radius+1)² window of tiles at zoom 19, build a
+// binary mask of line pixels, dilate to close gaps between the dots,
+// flood-fill the interior region from the click point, trace the region's
+// outer contour with the Moore-neighbour algorithm, and simplify with
+// Douglas–Peucker to keep only the polygon corners. If the flood reaches
+// the window edge, the parcel is bigger than the window — retry with a
+// larger radius.
 
 import { PNG } from 'pngjs';
 
 const ZOOM = 19;
 const TILE = 256;
-const RADIUS = 3;
-const SIZE = (RADIUS * 2 + 1) * TILE;
+const RETRY_RADII = [3, 6] as const;
 
 type Pt = [number, number];
+
+class ParcelTooLargeError extends Error {}
 
 function lngLatToTilePx(lng: number, lat: number) {
   const n = 2 ** ZOOM;
@@ -33,6 +36,24 @@ function tilePxToLngLat(xt: number, yt: number) {
 }
 
 export async function tracePolygonAt(lng: number, lat: number): Promise<Pt[]> {
+  let lastErr: unknown;
+  for (const radius of RETRY_RADII) {
+    try {
+      return await traceOnce(lng, lat, radius);
+    } catch (e) {
+      lastErr = e;
+      if (e instanceof ParcelTooLargeError) {
+        console.log('[trace] radius', radius, 'too small, retrying larger');
+        continue;
+      }
+      throw e;
+    }
+  }
+  throw lastErr;
+}
+
+async function traceOnce(lng: number, lat: number, RADIUS: number): Promise<Pt[]> {
+  const SIZE = (RADIUS * 2 + 1) * TILE;
   const center = lngLatToTilePx(lng, lat);
   const cx = Math.floor(center.x);
   const cy = Math.floor(center.y);
@@ -51,7 +72,7 @@ export async function tracePolygonAt(lng: number, lat: number): Promise<Pt[]> {
       const url = `https://wmtsod${sub}.bayernwolke.de/wmts/by_label/smerc/${ZOOM}/${tx}/${ty}`;
       const ox = (dx + RADIUS) * TILE;
       const oy = (dy + RADIUS) * TILE;
-      jobs.push(fetchTileToMask(url, lineMask, ox, oy, stats));
+      jobs.push(fetchTileToMask(url, lineMask, SIZE, ox, oy, stats));
     }
   }
   await Promise.all(jobs);
@@ -82,7 +103,7 @@ export async function tracePolygonAt(lng: number, lat: number): Promise<Pt[]> {
 
   const fill = floodFill(lineMask, SIZE, SIZE, seed.x, seed.y);
   if (!fill) {
-    throw new Error('Parzellengrenze nicht vollständig im sichtbaren Bereich — bitte näher an die Mitte der Parzelle klicken.');
+    throw new ParcelTooLargeError('Parzellengrenze nicht vollständig im sichtbaren Bereich — bitte näher an die Mitte der Parzelle klicken.');
   }
   let fillPx = 0;
   for (let i = 0; i < fill.length; i++) if (fill[i]) fillPx++;
@@ -120,6 +141,7 @@ export async function tracePolygonAt(lng: number, lat: number): Promise<Pt[]> {
 async function fetchTileToMask(
   url: string,
   mask: Uint8Array,
+  stride: number,
   ox: number,
   oy: number,
   stats: { fetched: number; failed: number; linePixels: number }
@@ -159,7 +181,7 @@ async function fetchTileToMask(
     for (let x = 0; x < w; x++) {
       const a = data[(y * w + x) * 4 + 3];
       if (a > 50) {
-        mask[(oy + y) * SIZE + (ox + x)] = 1;
+        mask[(oy + y) * stride + (ox + x)] = 1;
         localCount++;
       }
     }

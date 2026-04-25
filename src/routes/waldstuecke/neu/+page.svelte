@@ -44,26 +44,19 @@
     if (layersReady) return;
 
     m.addSource('alkis', { type: 'geojson', data: empty() });
+    // Fill is always present (transparent when unselected) so that
+    // queryRenderedFeatures can hit-test cached parcels on tap.
     m.addLayer({
       id: 'alkis-fill',
       type: 'fill',
       source: 'alkis',
       paint: {
-        'fill-color': [
-          'case',
-          ['==', ['get', 'taken'], true],
-          '#6b7280',
-          ['==', ['get', 'selected'], true],
-          '#5d7a4a',
-          '#c76a2b'
-        ],
+        'fill-color': '#dc2626',
         'fill-opacity': [
           'case',
-          ['==', ['get', 'taken'], true],
-          0.35,
           ['==', ['get', 'selected'], true],
-          0.55,
-          0.25
+          0.5,
+          0
         ]
       }
     });
@@ -72,38 +65,14 @@
       type: 'line',
       source: 'alkis',
       paint: {
-        'line-color': [
-          'case',
-          ['==', ['get', 'taken'], true],
-          '#374151',
-          ['==', ['get', 'selected'], true],
-          '#1f3d2c',
-          '#c76a2b'
-        ],
-        'line-width': [
+        'line-color': '#dc2626',
+        'line-width': 3,
+        'line-opacity': [
           'case',
           ['==', ['get', 'selected'], true],
-          2.5,
-          2
+          1,
+          0
         ]
-      }
-    });
-    m.addLayer({
-      id: 'alkis-label',
-      type: 'symbol',
-      source: 'alkis',
-      filter: ['==', ['get', 'taken'], true],
-      layout: {
-        'text-field': ['get', 'plotName'],
-        'text-size': 13,
-        'text-font': ['Open Sans Regular', 'Arial Unicode MS Regular'],
-        'symbol-placement': 'point',
-        'text-allow-overlap': false
-      },
-      paint: {
-        'text-color': '#1f2937',
-        'text-halo-color': '#f5f1e6',
-        'text-halo-width': 1.5
       }
     });
 
@@ -133,8 +102,7 @@
         properties: {
           cadastralId: f.cadastralId,
           selected: !!selection[f.cadastralId],
-          taken: !!f.takenBy,
-          plotName: f.takenBy?.plotName ?? 'Ohne Name'
+          taken: !!f.takenBy
         }
       }))
     });
