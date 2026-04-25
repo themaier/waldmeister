@@ -8,7 +8,6 @@
   import Map from "$lib/components/Map.svelte";
   import { Trash } from "phosphor-svelte";
   import maplibregl from "maplibre-gl";
-  import { onMount } from "svelte";
   import { parcelsInBbox, traceParcelAt } from "./cadastral.remote";
   import { createPlot } from "./create.remote";
 
@@ -28,7 +27,6 @@
   const selectionCount = $derived(selectedIds.length);
 
   let mlMap: maplibregl.Map | null = null;
-  let layersReady = false;
   let fetchTimer: ReturnType<typeof setTimeout> | null = null;
   let loadError = $state<string | null>(null);
   let tracing = $state(false);
@@ -41,7 +39,7 @@
   // --- Map layers -----------------------------------------------------------
 
   function ensureLayers(m: maplibregl.Map) {
-    if (layersReady) return;
+    if (m.getSource("alkis")) return;
 
     m.addSource("alkis", { type: "geojson", data: empty() });
     // Fill is always present (transparent when unselected) so that
@@ -76,8 +74,6 @@
     m.on("mouseleave", "alkis-fill", () => {
       m.getCanvas().style.cursor = "";
     });
-
-    layersReady = true;
   }
 
   const empty = (): GeoJSON.FeatureCollection => ({
@@ -86,7 +82,7 @@
   });
 
   function renderAlkis() {
-    if (!mlMap || !layersReady) return;
+    if (!mlMap || !mlMap.getSource("alkis")) return;
     const src = mlMap.getSource("alkis") as
       | maplibregl.GeoJSONSource
       | undefined;
@@ -160,13 +156,13 @@
       !!mlMap,
       "tracing=",
       tracing,
-      "layersReady=",
-      layersReady
+      "alkis=",
+      !!mlMap?.getSource("alkis")
     );
     if (!mlMap || tracing) return;
     const pt = mlMap.project([ev.lng, ev.lat]);
     const hits =
-      layersReady ?
+      mlMap.getSource("alkis") ?
         mlMap.queryRenderedFeatures(pt, { layers: ["alkis-fill"] })
       : [];
     console.log(
@@ -214,23 +210,29 @@
     }
   }
 
-  // --- Lifecycle ------------------------------------------------------------
-  // Svelte mounts children before parents, so Map.svelte's internal MapLibre
-  // instance is already created by the time this runs.
-
-  onMount(() => {
-    const m = mapRef?.instance();
+  // --- Map wiring ------------------------------------------------------------
+  // `map-surface` is `height: 100%` — the parent must have a defined height
+  // (see `.home-map` in app.css), same as the home page. `bind:this` is set
+  // on the child before `instance()` is valid; $effect matches +page.svelte.
+  $effect(() => {
+    if (!mapRef) return;
+    const m = mapRef.instance();
     if (!m) return;
     mlMap = m;
     const init = () => {
+      m.resize();
       ensureLayers(m);
       m.on("moveend", scheduleFetch);
       m.on("zoomend", scheduleFetch);
       scheduleFetch();
     };
-    if (m.loaded()) init();
-    else m.once("load", init);
+    if (m.loaded()) {
+      init();
+    } else {
+      m.once("load", init);
+    }
     return () => {
+      m.off("load", init);
       m.off("moveend", scheduleFetch);
       m.off("zoomend", scheduleFetch);
     };
@@ -266,7 +268,7 @@
     </div>
   </header>
 
-  <div class="relative">
+  <div class="home-map relative">
     <Map
       bind:this={mapRef}
       initialCenter={[12.9164, 48.26]}
