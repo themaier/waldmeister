@@ -5,15 +5,17 @@
 FROM oven/bun:1.1-alpine AS deps
 WORKDIR /app
 COPY package.json bun.lockb* ./
-RUN bun install --frozen-lockfile 2>/dev/null || bun install
+RUN --mount=type=cache,target=/root/.bun/install/cache \
+    bun install --frozen-lockfile 2>/dev/null || bun install
 
 # ---------- build ----------
 FROM oven/bun:1.1-alpine AS build
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
-# Svelte check is optional here; skip for faster CI.
-RUN bun run build
+# Persist Vite's transform cache across builds.
+RUN --mount=type=cache,target=/app/node_modules/.vite \
+    bun run build
 
 # ---------- runtime ----------
 FROM oven/bun:1.1-alpine AS runtime

@@ -36,7 +36,7 @@
     "pngjs": "^7.0.0",
     "postgres": "^3.4.4",
     "proj4": "^2.20.8",
-    "zod": "^3.23.8"
+    "zod": "^4.3.6"
   },
   "devDependencies": {
     "@sveltejs/kit": "^2.8.0",
