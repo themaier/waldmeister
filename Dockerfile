@@ -2,14 +2,24 @@
 # Multi-stage build: compile SvelteKit with Bun, run on Bun slim image.
 
 # ---------- deps ----------
-FROM oven/bun:1.1-alpine AS deps
+FROM oven/bun:1.3.13-debian AS deps
 WORKDIR /app
+#
+# Native deps (e.g. better-sqlite3) may need to compile during install.
+# Debian-based image avoids Alpine/musl pitfalls and matches Hetzner clean Debian.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    python3 \
+    make \
+    g++ \
+    pkg-config \
+  && rm -rf /var/lib/apt/lists/*
 COPY package.json bun.lockb* ./
 RUN --mount=type=cache,target=/root/.bun/install/cache \
     bun install --frozen-lockfile 2>/dev/null || bun install
 
 # ---------- build ----------
-FROM oven/bun:1.1-alpine AS build
+FROM oven/bun:1.3.13-debian AS build
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
@@ -18,7 +28,7 @@ RUN --mount=type=cache,target=/app/node_modules/.vite \
     bun run build
 
 # ---------- runtime ----------
-FROM oven/bun:1.1-alpine AS runtime
+FROM oven/bun:1.3.13-debian AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
 ENV PORT=3000
