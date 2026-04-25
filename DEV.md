@@ -18,16 +18,6 @@ bun run dev
 
 Open http://localhost:3000 — register an account at `/register`, then browse around.
 
-## Optional: seed demo data
-
-After registering a user with `demo@waldmeister.local`:
-
-```bash
-bun run db:seed
-```
-
-This creates a small "Demo-Wald" with six trees near München so the map has something to look at.
-
 ## Everyday commands
 
 | Command                  | What it does                                                                 |
@@ -40,7 +30,6 @@ This creates a small "Demo-Wald" with six trees near München so the map has som
 | `bun run db:reset`       | **Wipe** the DB volume and start fresh — you'll need to migrate + seed again |
 | `bun run db:migrate`     | Apply every new `drizzle/*.sql` file                                         |
 | `bun run db:studio`      | Open Drizzle Studio (GUI for the DB)                                         |
-| `bun run db:seed`        | Attach demo data to the `demo@waldmeister.local` user                        |
 | `bun run db:generate`    | Regenerate migration SQL from `src/lib/server/db/schema.ts`                  |
 
 ## Adding a schema change

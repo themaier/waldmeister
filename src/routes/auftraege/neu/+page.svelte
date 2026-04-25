@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { PageData } from './$types';
   import { goto } from '$app/navigation';
+  import { page } from '$app/state';
   import { ArrowLeft, ArrowRight, Tree, Polygon } from 'phosphor-svelte';
   import { HEALTH_LABELS, HEALTH_COLORS, TREE_TYPE_LABELS, TREE_LABEL_LABELS } from '$lib/enums';
 
@@ -54,6 +55,12 @@
 
   const selectedAreaIds = $derived(Object.keys(selectedAreas));
   const selectedTreeIds = $derived(Object.keys(selectedTrees));
+  const backHref = $derived.by(() => {
+    const from = page.url.searchParams.get('from');
+    // Only allow internal paths to avoid open-redirects.
+    if (from && from.startsWith('/')) return from;
+    return '/auftraege';
+  });
 
   async function submit(e: SubmitEvent) {
     e.preventDefault();
@@ -114,7 +121,7 @@
   <header class="sticky top-0 z-10 bg-earth/90 backdrop-blur-md backdrop-saturate-150">
     <div class="max-w-2xl mx-auto flex items-center gap-3 px-4 py-3">
       <a
-        href="/auftraege"
+        href={backHref}
         aria-label="Zurück"
         class="w-[38px] h-[38px] min-h-0 min-w-0 grid place-items-center rounded-btn border bg-surface text-ink hover:border-pine transition"
       >

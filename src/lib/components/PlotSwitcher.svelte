@@ -19,6 +19,7 @@
   } from 'phosphor-svelte';
   import { authClient } from '$lib/auth-client';
   import { goto } from '$app/navigation';
+  import { page } from '$app/state';
 
   interface Plot {
     id: string;
@@ -51,6 +52,7 @@
   const initial = $derived(
     (userName || '').trim().slice(0, 1).toUpperCase() || 'W'
   );
+  const fromHref = $derived.by(() => `${page.url.pathname}${page.url.search}`);
 
   function prev() {
     if (!hasMultiple) return;
@@ -189,7 +191,7 @@
         </li>
         <li>
           <a
-            href="/auftraege/neu"
+            href={`/auftraege/neu?from=${encodeURIComponent(fromHref)}`}
             role="menuitem"
             class="plus-item flex items-center gap-3 px-2 py-2.5 rounded-btn no-underline transition"
           >
