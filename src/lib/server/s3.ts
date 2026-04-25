@@ -38,6 +38,9 @@ export function plotImageKey(userId: string, plotId: string, uuid: string): stri
 export function areaImageKey(userId: string, areaId: string, uuid: string): string {
   return `users/${userId}/areas/${areaId}/${uuid}.jpg`;
 }
+export function boundaryStoneImageKey(userId: string, plotId: string, uuid: string): string {
+  return `users/${userId}/plots/${plotId}/grenzsteine/${uuid}.jpg`;
+}
 
 export async function presignUpload(key: string, contentType = 'image/jpeg'): Promise<string> {
   if (!bucket) throw new Error('S3_BUCKET not set');

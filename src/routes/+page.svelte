@@ -69,6 +69,10 @@
   // see at a glance which trees a freshly painted Bereich covers.
   let areaDrawActive = $state(false);
   let areaActionError = $state<string | null>(null);
+  // Bottom panel tab — keeps the start screen uncluttered. Defaults to the
+  // Waldstück overview; switches to "bereich" automatically after a Bereich
+  // is drawn so the user sees what they just made.
+  let activeTab = $state<"waldstueck" | "baeume" | "bereich">("waldstueck");
   let selectedAreaId = $state<string | null>(null);
   let selectedTreeIds = $state<Record<string, true>>({});
   // Official Bayern Einzelbäume points are loaded on demand for the active
@@ -147,33 +151,6 @@
           2,
           1,
         ],
-      },
-    });
-
-    map.addLayer({
-      id: "parcels-labels",
-      type: "symbol",
-      source: "parcels",
-      minzoom: 14,
-      layout: {
-        "text-field": ["get", "cadastralId"],
-        "text-size": ["case", ["==", ["get", "isOwned"], true], 14, 11],
-        "text-allow-overlap": false,
-      },
-      paint: {
-        "text-color": [
-          "case",
-          ["==", ["get", "isOwned"], true],
-          "#1f3d2c",
-          "#f5f1e6",
-        ],
-        "text-halo-color": [
-          "case",
-          ["==", ["get", "isOwned"], true],
-          "#f5f1e6",
-          "#132318",
-        ],
-        "text-halo-width": 1.5,
       },
     });
 
@@ -541,29 +518,34 @@
   function cancelAreaDraw() {
     areaDrawActive = false;
   }
-  async function completeAreaDraw(polygon: {
-    type: "Polygon";
-    coordinates: [number, number][][];
+  async function completeAreaDraw(input: {
+    geometry: { type: "Polygon"; coordinates: [number, number][][] };
+    comment: string | null;
+    appliedTreeStatus:
+      | "healthy"
+      | "must-watch"
+      | "infected"
+      | "dead"
+      | null;
   }) {
     if (!activePlotId) {
       areaDrawActive = false;
       return;
     }
-    try {
-      const { areaId } = await createArea({
-        plotId: activePlotId,
-        geometry: polygon,
-      });
-      // Refresh the overview so the new area is part of the regular list,
-      // then mark it as the current selection.
-      await loadActivePlotLayers(activePlotId);
-      selectArea(areaId);
-    } catch (e) {
-      areaActionError =
-        e instanceof Error ? e.message : "Bereich konnte nicht gespeichert werden.";
-    } finally {
-      areaDrawActive = false;
-    }
+    const { areaId } = await createArea({
+      plotId: activePlotId,
+      geometry: input.geometry,
+      comment: input.comment,
+      appliedTreeStatus: input.appliedTreeStatus,
+    });
+    // Refresh the overview so the new area + any health-status updates from
+    // the bulk apply (§5.8) are reflected, then mark the new area as the
+    // current selection.
+    await loadActivePlotLayers(activePlotId);
+    selectArea(areaId);
+    areaDrawActive = false;
+    // Switch to the Bereich tab so the user sees the result of their action.
+    activeTab = "bereich";
   }
 
   async function removeArea(areaId: string) {
@@ -693,8 +675,7 @@
         .setHTML(
           `<div class="p-2">
              <p class="text-xs opacity-60 mb-1">Flurstück</p>
-             <p class="text-2xl font-bold">${feature.properties?.cadastralId ?? ""}</p>
-             <p class="text-sm opacity-70 mt-2">Nicht in deinem Besitz.</p>
+             <p class="text-sm opacity-70">Nicht in deinem Besitz.</p>
            </div>`
         )
         .addTo(mlMap);
@@ -789,7 +770,6 @@
     plots={data.plots}
     activeId={activePlotId}
     onSwitch={switchTo}
-    onCreate={createPlot}
     toolActive={placementMode || routeDrawType !== null || areaDrawActive}
     userName={data.user?.name ?? ""}
   />
@@ -852,7 +832,7 @@
         <span class="w-2 h-2 rounded-full bg-ember animate-breathe"></span>
         <span>Tippe, um Baum zu setzen</span>
         <button
-          class="w-7 h-7 min-h-0 grid place-items-center rounded-full text-earth border-0"
+          class="w-7 h-7 min-h-0 min-w-0 grid place-items-center rounded-full text-earth border-0"
           style="background: color-mix(in srgb, var(--color-earth) 14%, transparent);"
           onclick={cancelPlacement}
           aria-label="Abbrechen"
@@ -874,10 +854,12 @@
       />
     {/if}
 
-    <!-- Bereich drawing tool — auto-closes the polygon on finger-up. -->
+    <!-- Bereich drawing tool — auto-closes the polygon on finger-up, then
+         opens an inline form for Kommentar + Baumstatus (§5.8). -->
     {#if areaDrawActive && mlMap && activePlotId}
       <AreaDrawTool
         {mlMap}
+        trees={treesForActive}
         onCancel={cancelAreaDraw}
         onComplete={completeAreaDraw}
       />
@@ -905,7 +887,7 @@
           Wechseln
         </button>
         <button
-          class="w-7 h-7 min-h-0 grid place-items-center rounded-full text-content-muted bg-transparent border-0 hover:text-ink hover:bg-surface-muted"
+          class="w-7 h-7 min-h-0 min-w-0 grid place-items-center rounded-full text-content-muted bg-transparent border-0 hover:text-ink hover:bg-surface-muted"
           onclick={() => (tapToast = null)}
           aria-label="Verwerfen"
         >
@@ -915,347 +897,397 @@
     {/if}
   </div>
 
-  <!-- Scrollable section beneath the map: three grouped cards — the
-       Waldstück itself (parcels, infrastructure, manage), the Bäume on it,
-       and the Bereich tool/list. Hidden while a tool is active so the
-       user's focus stays on the map. -->
+  <!-- Scrollable section beneath the map: a tab strip splits Waldstück /
+       Bäume / Bereich into one focused view at a time. Hidden while a tool
+       is active so the user's focus stays on the map. -->
   {#if activePlot && !routeDrawType && !placementMode && !areaDrawActive}
     <section class="home-scroll">
-      <!-- ===== Waldstück ===== -->
-      <article
-        class="flex flex-col gap-3 p-4 rounded-2xl bg-surface border shadow-understory"
+      <!-- Tab strip — segmented control at the top of the bottom panel. -->
+      <div
+        role="tablist"
+        aria-label="Bereich-Auswahl"
+        class="grid grid-cols-3 gap-1 p-1 rounded-pill bg-surface-muted border"
       >
-        <header class="flex items-start gap-3">
-          <div class="flex-1 min-w-0 flex flex-col gap-[2px]">
-            <span class="eyebrow">Waldstück</span>
-            <h2
-              class="font-serif font-medium text-[1.375rem] leading-tight tracking-tight text-ink m-0 truncate"
-              style="font-variation-settings: 'opsz' 96, 'SOFT' 40, 'WONK' 1;"
-              title={activePlot.name ?? "Ohne Name"}
-            >
-              {activePlot.name ?? "Ohne Name"}
-            </h2>
-            <p class="text-xs text-content-muted">
-              {activeParcels.length}
-              {activeParcels.length === 1 ? "Flurstück" : "Flurstücke"} ·
-              {routesForActive.length}
-              {routesForActive.length === 1 ? "Weg" : "Wege"} ·
-              {areasForActive.length}
-              {areasForActive.length === 1 ? "Bereich" : "Bereiche"}
-            </p>
-          </div>
-          <a
-            class="inline-flex items-center gap-1.5 px-3 py-2 min-h-[38px] rounded-pill text-ink border bg-surface font-semibold text-xs shadow-understory hover:-translate-y-px hover:shadow-canopy no-underline"
-            href="/waldstuecke/{activePlot.id}"
+          <button
+            role="tab"
+            aria-selected={activeTab === "waldstueck"}
+            class="inline-flex items-center justify-center gap-1.5 px-2 py-2 min-h-[40px] rounded-pill text-[0.8125rem] font-semibold transition truncate"
+            class:text-content-muted={activeTab !== "waldstueck"}
+            style={activeTab === "waldstueck"
+              ? "background: var(--color-surface); color: var(--color-ink); box-shadow: var(--shadow-duff);"
+              : ""}
+            onclick={() => (activeTab = "waldstueck")}
           >
-            <Gear size="1em" />
-            Verwalten
-          </a>
-        </header>
+            <Tree size="1em" weight="regular" />
+            <span>Waldstück</span>
+          </button>
+          <button
+            role="tab"
+            aria-selected={activeTab === "baeume"}
+            class="inline-flex items-center justify-center gap-1.5 px-2 py-2 min-h-[40px] rounded-pill text-[0.8125rem] font-semibold transition truncate"
+            class:text-content-muted={activeTab !== "baeume"}
+            style={activeTab === "baeume"
+              ? "background: var(--color-surface); color: var(--color-ink); box-shadow: var(--shadow-duff);"
+              : ""}
+            onclick={() => (activeTab = "baeume")}
+          >
+            <Crosshair size="1em" weight="regular" />
+            <span>Bäume <span class="text-content-muted font-normal">{treesForActive.length}</span></span>
+          </button>
+          <button
+            role="tab"
+            aria-selected={activeTab === "bereich"}
+            class="inline-flex items-center justify-center gap-1.5 px-2 py-2 min-h-[40px] rounded-pill text-[0.8125rem] font-semibold transition truncate"
+            class:text-content-muted={activeTab !== "bereich"}
+            style={activeTab === "bereich"
+              ? "background: var(--color-surface); color: var(--color-ink); box-shadow: var(--shadow-duff);"
+              : ""}
+            onclick={() => (activeTab = "bereich")}
+          >
+            <PolygonIcon size="1em" weight="regular" />
+            <span>Bereich <span class="text-content-muted font-normal">{areasForActive.length}</span></span>
+          </button>
+      </div>
 
-        <div class="flex flex-col gap-1.5">
-          <span class="eyebrow">Flurstücke</span>
-          <p class="text-sm text-content m-0">
-            {#if activeParcels.length === 0}
-              Keine Flurstücke zugeordnet.
-            {:else}
-              {activeParcels.map((p) => p.cadastralId).join(", ")}
-            {/if}
-          </p>
-        </div>
+      {#if activeTab === "waldstueck"}
+        <article class="flex flex-col gap-4 animate-rise">
+          <!-- Header row: name + Verwalten -->
+          <header class="flex items-start gap-3">
+            <div class="flex-1 min-w-0 flex flex-col gap-[2px]">
+              <span class="eyebrow">Waldstück</span>
+              <h2
+                class="font-serif font-medium text-[1.375rem] leading-tight tracking-tight text-ink m-0 truncate"
+                style="font-variation-settings: 'opsz' 96, 'SOFT' 40, 'WONK' 1;"
+                title={activePlot.name ?? "Ohne Name"}
+              >
+                {activePlot.name ?? "Ohne Name"}
+              </h2>
+              <p class="text-xs text-content-muted">
+                {activeParcels.length}
+                {activeParcels.length === 1 ? "Flurstück" : "Flurstücke"} ·
+                {routesForActive.length}
+                {routesForActive.length === 1 ? "Weg" : "Wege"} ·
+                {areasForActive.length}
+                {areasForActive.length === 1 ? "Bereich" : "Bereiche"}
+              </p>
+            </div>
+            <a
+              class="inline-flex items-center gap-1.5 px-3 py-2 min-h-[38px] rounded-pill text-ink border bg-surface font-semibold text-xs shadow-understory hover:-translate-y-px hover:shadow-canopy no-underline flex-shrink-0"
+              href="/waldstuecke/{activePlot.id}"
+            >
+              <Gear size="1em" />
+              Verwalten
+            </a>
+          </header>
 
-        <div class="flex flex-col gap-2">
-          <div class="flex items-center justify-between gap-2">
-            <h3
-              class="text-xs font-semibold uppercase tracking-wider text-content-muted m-0"
-            >
-              Wege ({routesForActive.length})
-            </h3>
-            <button
-              class="inline-flex items-center gap-1.5 px-3 py-1.5 min-h-[34px] rounded-pill text-ink border bg-surface font-semibold text-xs shadow-understory hover:-translate-y-px hover:shadow-canopy"
-              aria-expanded={routeTypePickerOpen}
-              onclick={() => (routeTypePickerOpen = !routeTypePickerOpen)}
-            >
-              <Path size="1em" />
-              Weg zeichnen
-            </button>
-          </div>
-          {#if routeTypePickerOpen}
-            <div
-              class="grid grid-cols-2 gap-2 animate-rise"
-              role="group"
-              aria-label="Wegtyp wählen"
-            >
+          <!-- Wege -->
+          <div class="flex flex-col gap-2 p-4 rounded-2xl bg-surface border shadow-understory">
+            <div class="flex items-center justify-between gap-2">
+              <h3 class="text-xs font-semibold uppercase tracking-wider text-content-muted m-0">
+                Wege ({routesForActive.length})
+              </h3>
               <button
-                class="inline-flex items-center justify-center gap-2 px-3 py-2 min-h-[38px] rounded-pill text-ink border bg-surface font-semibold text-xs shadow-understory hover:-translate-y-px hover:shadow-canopy"
-                onclick={() => startRouteDraw("anfahrt")}
+                class="inline-flex items-center gap-1.5 px-3 py-1.5 min-h-[34px] rounded-pill text-ink border bg-surface-muted font-semibold text-xs hover:border-pine"
+                aria-expanded={routeTypePickerOpen}
+                onclick={() => (routeTypePickerOpen = !routeTypePickerOpen)}
               >
-                <span
-                  class="inline-block w-6 h-[3px] rounded-full"
-                  style="background: #2563eb;"
-                ></span>
-                Anfahrt
-              </button>
-              <button
-                class="inline-flex items-center justify-center gap-2 px-3 py-2 min-h-[38px] rounded-pill text-ink border bg-surface font-semibold text-xs shadow-understory hover:-translate-y-px hover:shadow-canopy"
-                onclick={() => startRouteDraw("rueckegasse")}
-              >
-                <span
-                  class="inline-block w-6 h-[3px] rounded-full"
-                  style="background: repeating-linear-gradient(90deg, #60a5fa 0 4px, transparent 4px 8px);"
-                ></span>
-                Rückegasse
+                <Path size="1em" />
+                Weg zeichnen
               </button>
             </div>
-          {/if}
-          {#if routesForActive.length === 0}
-            <p class="text-sm text-content-muted m-0">
-              Noch keine Wege gezeichnet.
+            {#if routeTypePickerOpen}
+              <div
+                class="grid grid-cols-2 gap-2 animate-rise"
+                role="group"
+                aria-label="Wegtyp wählen"
+              >
+                <button
+                  class="inline-flex items-center justify-center gap-2 px-3 py-2 min-h-[38px] rounded-pill text-ink border bg-surface font-semibold text-xs shadow-understory hover:-translate-y-px hover:shadow-canopy"
+                  onclick={() => startRouteDraw("anfahrt")}
+                >
+                  <span
+                    class="inline-block w-6 h-[3px] rounded-full"
+                    style="background: #2563eb;"
+                  ></span>
+                  Anfahrt
+                </button>
+                <button
+                  class="inline-flex items-center justify-center gap-2 px-3 py-2 min-h-[38px] rounded-pill text-ink border bg-surface font-semibold text-xs shadow-understory hover:-translate-y-px hover:shadow-canopy"
+                  onclick={() => startRouteDraw("rueckegasse")}
+                >
+                  <span
+                    class="inline-block w-6 h-[3px] rounded-full"
+                    style="background: repeating-linear-gradient(90deg, #60a5fa 0 4px, transparent 4px 8px);"
+                  ></span>
+                  Rückegasse
+                </button>
+              </div>
+            {/if}
+            {#if routesForActive.length === 0}
+              <p class="text-sm text-content-muted m-0">Noch keine Wege gezeichnet.</p>
+            {:else}
+              <ul class="flex flex-col gap-1.5 list-none p-0 m-0">
+                {#each routesForActive as r (r.id)}
+                  <li class="flex items-center justify-between gap-3 px-3 py-2 rounded-btn bg-surface-muted border">
+                    <div class="flex items-center gap-2 min-w-0">
+                      <span
+                        class="inline-block w-6 h-[3px] rounded-full flex-shrink-0"
+                        style={r.routeType === "rueckegasse"
+                          ? "background: repeating-linear-gradient(90deg, #60a5fa 0 4px, transparent 4px 8px);"
+                          : "background: #2563eb;"}
+                        aria-hidden="true"
+                      ></span>
+                      <span class="text-sm text-ink font-medium truncate">
+                        {r.name ?? ROUTE_TYPE_LABELS[r.routeType as keyof typeof ROUTE_TYPE_LABELS]}
+                      </span>
+                    </div>
+                    <span class="text-xs text-content-muted whitespace-nowrap">
+                      {VEHICLE_TYPE_LABELS[r.vehicleType as keyof typeof VEHICLE_TYPE_LABELS] ?? r.vehicleType}
+                    </span>
+                  </li>
+                {/each}
+              </ul>
+            {/if}
+          </div>
+
+          <!-- Plot-level analyses: official BayernAtlas tree dots + count.
+               These belong to the Waldstück, not to the user's own
+               inventory, so they live here rather than under "Bäume". -->
+          <div class="flex flex-col gap-2 p-4 rounded-2xl bg-surface border shadow-understory">
+            <h3 class="text-xs font-semibold uppercase tracking-wider text-content-muted m-0">
+              Offizielle Daten (BayernAtlas)
+            </h3>
+            <p class="text-xs text-content-muted m-0">
+              Einzelbaum-Punkte aus dem amtlichen Datensatz für dieses Waldstück.
             </p>
+            <div class="grid grid-cols-2 gap-2">
+              <button
+                class="inline-flex items-center justify-center gap-2 px-3 py-2.5 min-h-[42px] rounded-pill text-ink border bg-surface-muted font-semibold text-sm hover:border-pine disabled:opacity-60"
+                aria-pressed={officialTreesVisible}
+                onclick={toggleOfficialTrees}
+                disabled={officialTreesLoading}
+              >
+                <Tree size="1.125em" />
+                <span class="truncate">
+                  {officialTreesLoading ? "Lade…" : officialTreesVisible ? "Punkte aus" : "Baum-Punkte"}
+                </span>
+              </button>
+              <button
+                class="inline-flex items-center justify-center gap-2 px-3 py-2.5 min-h-[42px] rounded-pill text-ink border bg-surface-muted font-semibold text-sm hover:border-pine disabled:opacity-60"
+                onclick={countOfficialTrees}
+                disabled={treeCountLoading}
+              >
+                <Calculator size="1.125em" />
+                <span>{treeCountLoading ? "Zähle…" : "Bäume zählen"}</span>
+              </button>
+            </div>
+            {#if treeActionError}
+              <div class="rounded-btn bg-surface-muted border px-3 py-2 text-xs text-crimson">
+                {treeActionError}
+              </div>
+            {/if}
+            {#if treeCountResult != null}
+              <div class="rounded-btn bg-surface-muted border px-3 py-2 text-xs text-content">
+                Offiziell gezählt: <strong>{treeCountResult}</strong> Bäume
+              </div>
+            {/if}
+          </div>
+        </article>
+      {/if}
+
+      {#if activeTab === "baeume"}
+        <article class="flex flex-col gap-3 animate-rise">
+          <header class="flex items-start justify-between gap-3">
+            <div class="flex-1 min-w-0 flex flex-col gap-[2px]">
+              <span class="eyebrow">Bäume</span>
+              <h2
+                class="font-serif font-medium text-[1.25rem] leading-tight tracking-tight text-ink m-0"
+                style="font-variation-settings: 'opsz' 96, 'SOFT' 40, 'WONK' 1;"
+              >
+                {treesForActive.length} erfasst
+              </h2>
+              <p class="text-xs text-content-muted">
+                Tippe auf das Kamera-Symbol oben, um einen Baum mit GPS aufzunehmen.
+              </p>
+            </div>
+            <button
+              class="inline-flex items-center gap-1.5 px-3 py-2 min-h-[38px] rounded-pill text-ink border bg-surface font-semibold text-xs shadow-understory hover:-translate-y-px hover:shadow-canopy flex-shrink-0"
+              onclick={startPlacement}
+            >
+              <Crosshair size="1em" />
+              Platzieren
+            </button>
+          </header>
+
+          {#if treesForActive.length === 0}
+            <div class="rounded-2xl border border-dashed bg-surface-muted px-4 py-6 text-center">
+              <p class="text-sm text-content-muted m-0">
+                Noch keine Bäume erfasst.
+              </p>
+            </div>
           {:else}
             <ul class="flex flex-col gap-1.5 list-none p-0 m-0">
-              {#each routesForActive as r (r.id)}
+              {#each treesForActive as t (t.id)}
                 <li
-                  class="flex items-center justify-between gap-3 px-3 py-2 rounded-btn bg-surface-muted border"
+                  class="flex items-center justify-between gap-3 px-3 py-2 rounded-btn border transition"
+                  class:bg-surface-muted={!selectedTreeIds[t.id]}
+                  style={selectedTreeIds[t.id]
+                    ? "background: color-mix(in srgb, var(--color-ember) 14%, var(--color-surface)); border-color: var(--color-rust);"
+                    : ""}
                 >
                   <div class="flex items-center gap-2 min-w-0">
                     <span
-                      class="inline-block w-6 h-[3px] rounded-full flex-shrink-0"
-                      style={r.routeType === "rueckegasse"
-                        ? "background: repeating-linear-gradient(90deg, #60a5fa 0 4px, transparent 4px 8px);"
-                        : "background: #2563eb;"}
+                      class="inline-block w-2.5 h-2.5 rounded-full flex-shrink-0"
+                      style="background: {t.healthStatus === 'healthy'
+                        ? '#5d7a4a'
+                        : t.healthStatus === 'must-watch'
+                          ? '#d4a23c'
+                          : t.healthStatus === 'infected'
+                            ? '#c76a2b'
+                            : '#4a4a4a'};"
                       aria-hidden="true"
                     ></span>
                     <span class="text-sm text-ink font-medium truncate">
-                      {r.name ??
-                        ROUTE_TYPE_LABELS[
-                          r.routeType as keyof typeof ROUTE_TYPE_LABELS
-                        ]}
+                      {TREE_TYPE_LABELS[t.treeTypeId as keyof typeof TREE_TYPE_LABELS] ?? t.treeTypeId}
                     </span>
                   </div>
                   <span class="text-xs text-content-muted whitespace-nowrap">
-                    {VEHICLE_TYPE_LABELS[
-                      r.vehicleType as keyof typeof VEHICLE_TYPE_LABELS
-                    ] ?? r.vehicleType}
+                    {HEALTH_LABELS[t.healthStatus as keyof typeof HEALTH_LABELS] ?? t.healthStatus}
                   </span>
                 </li>
               {/each}
             </ul>
           {/if}
-        </div>
-      </article>
+        </article>
+      {/if}
 
-      <!-- ===== Bäume ===== -->
-      <article
-        class="flex flex-col gap-3 p-4 rounded-2xl bg-surface border shadow-understory"
-      >
-        <header class="flex items-start justify-between gap-3">
-          <div class="flex-1 min-w-0 flex flex-col gap-[2px]">
-            <span class="eyebrow">Bäume</span>
-            <h2
-              class="font-serif font-medium text-[1.25rem] leading-tight tracking-tight text-ink m-0"
-              style="font-variation-settings: 'opsz' 96, 'SOFT' 40, 'WONK' 1;"
-            >
-              {treesForActive.length} erfasst
-            </h2>
-          </div>
-        </header>
-
-        <div class="grid grid-cols-2 gap-2">
-          <button
-            class="inline-flex items-center justify-center gap-2 px-3 py-2.5 min-h-[42px] rounded-pill text-ink border bg-surface font-semibold text-sm shadow-understory hover:-translate-y-px hover:shadow-canopy"
-            onclick={startPlacement}
-          >
-            <Crosshair size="1.125em" />
-            <span>Baum platzieren</span>
-          </button>
-          <button
-            class="inline-flex items-center justify-center gap-2 px-3 py-2.5 min-h-[42px] rounded-pill text-ink border bg-surface font-semibold text-sm shadow-understory hover:-translate-y-px hover:shadow-canopy"
-            aria-pressed={officialTreesVisible}
-            onclick={toggleOfficialTrees}
-          >
-            <Tree size="1.125em" />
-            <span class="truncate">
-              {officialTreesLoading ? "Lade…"
-              : officialTreesVisible ? "Punkte aus"
-              : "Baum-Punkte"}
-            </span>
-          </button>
-          <button
-            class="col-span-2 inline-flex items-center justify-center gap-2 px-3 py-2.5 min-h-[42px] rounded-pill text-ink border bg-surface font-semibold text-sm shadow-understory hover:-translate-y-px hover:shadow-canopy"
-            onclick={countOfficialTrees}
-          >
-            <Calculator size="1.125em" />
-            <span>{treeCountLoading ? "Zähle…" : "Bäume zählen"}</span>
-          </button>
-        </div>
-
-        {#if treeActionError}
-          <div
-            class="rounded-btn bg-surface-muted border px-3 py-2 text-xs text-crimson"
-          >
-            {treeActionError}
-          </div>
-        {/if}
-        {#if treeCountResult != null}
-          <div
-            class="rounded-btn bg-surface-muted border px-3 py-2 text-xs text-content"
-          >
-            Offiziell gezählt: <strong>{treeCountResult}</strong> Bäume
-          </div>
-        {/if}
-
-        {#if treesForActive.length === 0}
-          <p class="text-sm text-content-muted m-0">
-            Noch keine Bäume erfasst. Tippe auf das Kamera-Symbol oben, um den
-            ersten Baum hier hinzuzufügen.
-          </p>
-        {:else}
-          <ul class="flex flex-col gap-1.5 list-none p-0 m-0">
-            {#each treesForActive as t (t.id)}
-              <li
-                class="flex items-center justify-between gap-3 px-3 py-2 rounded-btn border transition"
-                class:bg-surface-muted={!selectedTreeIds[t.id]}
-                style={selectedTreeIds[t.id]
-                  ? "background: color-mix(in srgb, var(--color-ember) 14%, var(--color-surface)); border-color: var(--color-rust);"
-                  : ""}
+      {#if activeTab === "bereich"}
+        <article class="flex flex-col gap-3 animate-rise">
+          <header class="flex items-start justify-between gap-3">
+            <div class="flex-1 min-w-0 flex flex-col gap-[2px]">
+              <span class="eyebrow">Bereich</span>
+              <h2
+                class="font-serif font-medium text-[1.25rem] leading-tight tracking-tight text-ink m-0"
+                style="font-variation-settings: 'opsz' 96, 'SOFT' 40, 'WONK' 1;"
               >
-                <div class="flex items-center gap-2 min-w-0">
-                  <span
-                    class="inline-block w-2.5 h-2.5 rounded-full flex-shrink-0"
-                    style="background: {t.healthStatus === 'healthy'
-                      ? '#5d7a4a'
-                      : t.healthStatus === 'must-watch'
-                        ? '#d4a23c'
-                        : t.healthStatus === 'infected'
-                          ? '#c76a2b'
-                          : '#4a4a4a'};"
-                    aria-hidden="true"
-                  ></span>
-                  <span class="text-sm text-ink font-medium truncate">
-                    {TREE_TYPE_LABELS[
-                      t.treeTypeId as keyof typeof TREE_TYPE_LABELS
-                    ] ?? t.treeTypeId}
-                  </span>
-                </div>
-                <span class="text-xs text-content-muted whitespace-nowrap">
-                  {HEALTH_LABELS[
-                    t.healthStatus as keyof typeof HEALTH_LABELS
-                  ] ?? t.healthStatus}
-                </span>
-              </li>
-            {/each}
-          </ul>
-        {/if}
-      </article>
-
-      <!-- ===== Bereich ===== -->
-      <article
-        class="flex flex-col gap-3 p-4 rounded-2xl bg-surface border shadow-understory"
-      >
-        <header class="flex items-start justify-between gap-3">
-          <div class="flex-1 min-w-0 flex flex-col gap-[2px]">
-            <span class="eyebrow">Bereich</span>
-            <h2
-              class="font-serif font-medium text-[1.25rem] leading-tight tracking-tight text-ink m-0"
-              style="font-variation-settings: 'opsz' 96, 'SOFT' 40, 'WONK' 1;"
-            >
-              {areasForActive.length} markiert
-            </h2>
-          </div>
-          <button
-            class="inline-flex items-center gap-1.5 px-3 py-2 min-h-[38px] rounded-pill text-earth border font-semibold text-xs shadow-understory hover:-translate-y-px hover:shadow-canopy"
-            style="background: var(--color-amber); border-color: color-mix(in srgb, var(--color-amber) 70%, black);"
-            onclick={startAreaDraw}
-          >
-            <PolygonIcon size="1em" weight="bold" />
-            Bereich zeichnen
-          </button>
-        </header>
-
-        <p class="text-xs text-content-muted m-0">
-          Mit dem Finger eine Fläche auf der Karte umkreisen — Anfang und Ende
-          werden automatisch verbunden, und die Bäume innerhalb werden
-          markiert.
-        </p>
-
-        {#if areaActionError}
-          <div
-            class="rounded-btn bg-surface-muted border px-3 py-2 text-xs text-crimson"
-          >
-            {areaActionError}
-          </div>
-        {/if}
-
-        {#if selectedAreaId}
-          {@const selectedCount = Object.keys(selectedTreeIds).length}
-          <div
-            class="rounded-btn border px-3 py-2 flex items-center justify-between gap-3"
-            style="background: color-mix(in srgb, var(--color-ember) 12%, var(--color-surface)); border-color: var(--color-rust);"
-          >
-            <div class="flex flex-col min-w-0">
-              <span class="eyebrow">Aktuelle Auswahl</span>
-              <span class="text-sm text-ink font-medium">
-                {selectedCount}
-                {selectedCount === 1 ? "Baum" : "Bäume"} im Bereich
-              </span>
+                {areasForActive.length} markiert
+              </h2>
+              <p class="text-xs text-content-muted">
+                Eine Fläche umkreisen — z.B. Sturmschaden oder befallener Abschnitt.
+              </p>
             </div>
             <button
-              class="inline-flex items-center gap-1 px-3 py-1.5 min-h-[34px] rounded-pill text-ink border bg-surface font-semibold text-xs hover:border-pine"
-              onclick={clearSelection}
+              class="inline-flex items-center gap-1.5 px-3 py-2 min-h-[38px] rounded-pill text-earth border font-semibold text-xs shadow-understory hover:-translate-y-px hover:shadow-canopy flex-shrink-0"
+              style="background: var(--color-amber); border-color: color-mix(in srgb, var(--color-amber) 70%, black);"
+              onclick={startAreaDraw}
             >
-              <X size="0.95em" weight="bold" />
-              Auswahl aufheben
+              <PolygonIcon size="1em" weight="bold" />
+              Zeichnen
             </button>
-          </div>
-        {/if}
+          </header>
 
-        {#if areasForActive.length === 0}
-          <p class="text-sm text-content-muted m-0">
-            Noch keine Bereiche markiert.
-          </p>
-        {:else}
-          <ul class="flex flex-col gap-1.5 list-none p-0 m-0">
-            {#each areasForActive as a, i (a.id)}
-              {@const inside = treesInsideArea(a).length}
-              <li
-                class="flex items-center justify-between gap-3 px-3 py-2 rounded-btn border transition"
-                class:bg-surface-muted={a.id !== selectedAreaId}
-                style={a.id === selectedAreaId
-                  ? "background: color-mix(in srgb, var(--color-ember) 14%, var(--color-surface)); border-color: var(--color-rust);"
-                  : ""}
+          {#if areaActionError}
+            <div class="rounded-btn bg-surface-muted border px-3 py-2 text-xs text-crimson">
+              {areaActionError}
+            </div>
+          {/if}
+
+          {#if selectedAreaId}
+            {@const selectedCount = Object.keys(selectedTreeIds).length}
+            <div
+              class="rounded-btn border px-3 py-2 flex items-center justify-between gap-3"
+              style="background: color-mix(in srgb, var(--color-ember) 12%, var(--color-surface)); border-color: var(--color-rust);"
+            >
+              <div class="flex flex-col min-w-0">
+                <span class="eyebrow">Aktuelle Auswahl</span>
+                <span class="text-sm text-ink font-medium">
+                  {selectedCount}
+                  {selectedCount === 1 ? "Baum" : "Bäume"} im Bereich
+                </span>
+              </div>
+              <button
+                class="inline-flex items-center gap-1 px-3 py-1.5 min-h-[34px] rounded-pill text-ink border bg-surface font-semibold text-xs hover:border-pine"
+                onclick={clearSelection}
               >
-                <button
-                  class="flex-1 min-w-0 flex items-center gap-2 bg-transparent border-0 p-0 text-left"
-                  onclick={() => selectArea(a.id)}
-                  aria-pressed={a.id === selectedAreaId}
+                <X size="0.95em" weight="bold" />
+                Aufheben
+              </button>
+            </div>
+          {/if}
+
+          {#if areasForActive.length === 0}
+            <div class="rounded-2xl border border-dashed bg-surface-muted px-4 py-6 text-center">
+              <p class="text-sm text-content-muted m-0">
+                Noch keine Bereiche markiert.
+              </p>
+            </div>
+          {:else}
+            <ul class="flex flex-col gap-1.5 list-none p-0 m-0">
+              {#each areasForActive as a, i (a.id)}
+                {@const inside = treesInsideArea(a).length}
+                <li
+                  class="flex items-stretch gap-2 rounded-btn border transition overflow-hidden"
+                  class:bg-surface-muted={a.id !== selectedAreaId}
+                  style={a.id === selectedAreaId
+                    ? "background: color-mix(in srgb, var(--color-ember) 14%, var(--color-surface)); border-color: var(--color-rust);"
+                    : ""}
                 >
-                  <span
-                    class="inline-block w-3 h-3 rounded-sm flex-shrink-0 border"
-                    style="background: color-mix(in srgb, #c98f2a 22%, transparent); border-color: #c98f2a;"
-                    aria-hidden="true"
-                  ></span>
-                  <span class="text-sm text-ink font-medium truncate">
-                    Bereich {String(i + 1).padStart(2, "0")}
-                  </span>
-                  <span class="text-xs text-content-muted whitespace-nowrap">
-                    · {inside}
-                    {inside === 1 ? "Baum" : "Bäume"}
-                  </span>
-                </button>
-                <button
-                  class="w-8 h-8 min-h-0 grid place-items-center rounded-full bg-transparent border text-content-muted hover:text-crimson hover:border-crimson"
-                  onclick={() => removeArea(a.id)}
-                  aria-label="Bereich löschen"
-                  title="Bereich löschen"
-                >
-                  <X size="0.95em" weight="bold" />
-                </button>
-              </li>
-            {/each}
-          </ul>
-        {/if}
-      </article>
+                  <button
+                    class="flex-1 min-w-0 flex flex-col items-start gap-0.5 bg-transparent border-0 px-3 py-2 text-left"
+                    onclick={() => selectArea(a.id)}
+                    aria-pressed={a.id === selectedAreaId}
+                  >
+                    <div class="flex items-center gap-2 min-w-0 max-w-full">
+                      <span
+                        class="inline-block w-3 h-3 rounded-sm flex-shrink-0 border"
+                        style="background: color-mix(in srgb, #c98f2a 22%, transparent); border-color: #c98f2a;"
+                        aria-hidden="true"
+                      ></span>
+                      <span class="text-sm text-ink font-medium truncate">
+                        Bereich {String(i + 1).padStart(2, "0")}
+                      </span>
+                      <span class="text-xs text-content-muted whitespace-nowrap">
+                        · {inside} {inside === 1 ? "Baum" : "Bäume"}
+                      </span>
+                    </div>
+                    {#if a.appliedTreeStatus || a.comment}
+                      <div class="flex items-center gap-2 mt-0.5 max-w-full min-w-0">
+                        {#if a.appliedTreeStatus}
+                          <span
+                            class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-pill text-[0.6875rem] font-semibold flex-shrink-0"
+                            style="background: {a.appliedTreeStatus === 'healthy'
+                              ? '#5d7a4a'
+                              : a.appliedTreeStatus === 'must-watch'
+                                ? '#d4a23c'
+                                : a.appliedTreeStatus === 'infected'
+                                  ? '#c76a2b'
+                                  : '#4a4a4a'}; color: #fff;"
+                          >
+                            {HEALTH_LABELS[a.appliedTreeStatus as keyof typeof HEALTH_LABELS] ?? a.appliedTreeStatus}
+                          </span>
+                        {/if}
+                        {#if a.comment}
+                          <span class="text-xs text-content-muted truncate min-w-0">
+                            {a.comment}
+                          </span>
+                        {/if}
+                      </div>
+                    {/if}
+                  </button>
+                  <button
+                    class="w-10 grid place-items-center bg-transparent border-0 border-l text-content-muted hover:text-crimson hover:bg-surface flex-shrink-0"
+                    onclick={() => removeArea(a.id)}
+                    aria-label="Bereich löschen"
+                    title="Bereich löschen"
+                  >
+                    <X size="0.95em" weight="bold" />
+                  </button>
+                </li>
+              {/each}
+            </ul>
+          {/if}
+        </article>
+      {/if}
     </section>
   {/if}
 </div>

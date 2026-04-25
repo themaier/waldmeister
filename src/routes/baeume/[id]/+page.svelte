@@ -34,7 +34,7 @@
       <a
         href="/"
         aria-label="Zurück zur Karte"
-        class="w-[38px] h-[38px] min-h-0 grid place-items-center rounded-btn border bg-surface text-ink hover:border-pine transition"
+        class="w-[38px] h-[38px] min-h-0 min-w-0 grid place-items-center rounded-btn border bg-surface text-ink hover:border-pine transition"
       >
         <ArrowLeft size="1.125em" weight="bold" />
       </a>

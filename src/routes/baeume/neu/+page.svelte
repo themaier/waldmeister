@@ -238,7 +238,7 @@
           <div class="relative aspect-square rounded-btn overflow-hidden bg-surface-muted border">
             <img src={img.preview} alt="Baum-Foto {i + 1}" class="object-cover w-full h-full" />
             <button
-              class="absolute top-1 right-1 w-8 h-8 min-h-0 grid place-items-center rounded-full text-earth border-0"
+              class="absolute top-1 right-1 w-8 h-8 min-h-0 min-w-0 grid place-items-center rounded-full text-earth border-0"
               style="background: var(--color-crimson);"
               onclick={() => removeImage(i)}
               aria-label="Entfernen"

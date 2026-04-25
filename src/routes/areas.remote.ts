@@ -2,17 +2,23 @@ import { getRequestEvent, command } from '$app/server';
 import { error } from '@sveltejs/kit';
 import { z } from 'zod';
 import { db } from '$lib/server/db';
-import { forestPlots, areas } from '$lib/server/db/schema';
+import { forestPlots, areas, trees } from '$lib/server/db/schema';
 import { geoJsonToGeom } from '$lib/server/db/geo';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import { getPlotOverview } from './trees.remote';
+import { HEALTH_STATUSES } from '$lib/enums';
 
-// README §4.5 — a Bereich is a freehand polygon scribbled on the map. The
-// drawing tool auto-closes the loop on finger-up, so the client always sends
-// a valid GeoJSON Polygon (single ring, first == last vertex).
+// README §4.5 / §5.8 — a Bereich is a freehand polygon scribbled on the map.
+// The drawing tool auto-closes the loop on finger-up, so the client always
+// sends a valid GeoJSON Polygon (single ring, first == last vertex).
+//
+// `appliedTreeStatus` records the user's intent to bulk-apply a health status
+// to every tree inside the polygon at submit time. When set, we run a single
+// PostGIS-backed UPDATE in the same transaction.
 const createAreaSchema = z.object({
   plotId: z.string().uuid(),
   comment: z.string().trim().max(2000).nullable().optional(),
+  appliedTreeStatus: z.enum(HEALTH_STATUSES).nullable().optional(),
   geometry: z.object({
     type: z.literal('Polygon'),
     coordinates: z
@@ -43,17 +49,41 @@ export const createArea = command('unchecked', async (raw: unknown) => {
     .limit(1);
   if (!plot) throw error(404, 'Waldstück nicht gefunden.');
 
-  const [row] = await db
-    .insert(areas)
-    .values({
-      plotId: input.plotId,
-      comment: input.comment?.trim() || null,
-      geometry: geoJsonToGeom(input.geometry) as unknown as string
-    })
-    .returning({ id: areas.id });
+  const status = input.appliedTreeStatus ?? null;
+  const geomSql = geoJsonToGeom(input.geometry);
+
+  const result = await db.transaction(async (tx) => {
+    const [row] = await tx
+      .insert(areas)
+      .values({
+        plotId: input.plotId,
+        comment: input.comment?.trim() || null,
+        appliedTreeStatus: status,
+        geometry: geomSql as unknown as string
+      })
+      .returning({ id: areas.id });
+
+    let appliedCount = 0;
+    if (status) {
+      // Bulk-apply the health status to every tree whose point falls inside
+      // the polygon (README §5.8). Single transactional UPDATE; ST_Contains
+      // uses the same geometry we just stored.
+      const updated = await tx.execute(sql`
+        UPDATE trees
+        SET health_status = ${status}, updated_at = now()
+        WHERE plot_id = ${input.plotId}
+          AND ST_Contains(
+            (SELECT geometry FROM areas WHERE id = ${row.id}),
+            ST_SetSRID(ST_MakePoint(longitude::float8, latitude::float8), 4326)
+          )
+      `);
+      appliedCount = (updated as { rowCount?: number }).rowCount ?? 0;
+    }
+    return { areaId: row.id, appliedCount };
+  });
 
   void getPlotOverview(input.plotId).refresh();
-  return { areaId: row.id };
+  return result;
 });
 
 export const deleteArea = command(z.string().uuid(), async (id) => {

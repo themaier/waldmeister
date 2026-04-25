@@ -111,7 +111,11 @@ export const load: PageServerLoad = async ({ params }) => {
       title: order.title,
       instructions: order.instructions,
       status: order.status,
-      visibility: vis
+      visibility: vis,
+      selection: order.selectionSnapshot as
+        | { type: 'plot'; plotId: string }
+        | { type: 'areas'; plotId: string; areaIds: string[] }
+        | { type: 'trees'; treeIds: string[] }
     },
     trees: wot.map((w) => ({
       assignmentId: w.id,

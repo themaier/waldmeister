@@ -1,17 +1,100 @@
 import { redirect, fail } from '@sveltejs/kit';
 import type { Actions, PageServerLoad } from './$types';
 import { db } from '$lib/server/db';
-import { forestPlots, trees, workOrders, workOrderTrees } from '$lib/server/db/schema';
-import { and, eq, inArray } from 'drizzle-orm';
+import { forestPlots, trees, areas, workOrders, workOrderTrees } from '$lib/server/db/schema';
+import { geomToGeoJson } from '$lib/server/db/geo';
+import { and, eq, inArray, sql } from 'drizzle-orm';
 import { z } from 'zod';
+import { HEALTH_STATUSES, TREE_TYPES, TREE_LABELS } from '$lib/enums';
 
 export const load: PageServerLoad = async ({ locals }) => {
   if (!locals.user) throw redirect(303, '/login');
-  const plots = await db
+
+  const plotRows = await db
     .select({ id: forestPlots.id, name: forestPlots.name })
     .from(forestPlots)
     .where(eq(forestPlots.ownerId, locals.user.id))
     .orderBy(forestPlots.createdAt);
+
+  if (plotRows.length === 0) {
+    return { plots: [] as Array<{ id: string; name: string | null; trees: never[]; areas: never[] }> };
+  }
+
+  const plotIds = plotRows.map((p) => p.id);
+
+  const [treeRows, areaRows] = await Promise.all([
+    db
+      .select({
+        id: trees.id,
+        plotId: trees.plotId,
+        latitude: trees.latitude,
+        longitude: trees.longitude,
+        treeTypeId: trees.treeTypeId,
+        healthStatus: trees.healthStatus,
+        labels: trees.labels
+      })
+      .from(trees)
+      .where(inArray(trees.plotId, plotIds))
+      .orderBy(trees.createdAt),
+    db
+      .select({
+        id: areas.id,
+        plotId: areas.plotId,
+        comment: areas.comment,
+        appliedTreeStatus: areas.appliedTreeStatus,
+        geometry: geomToGeoJson(areas.geometry).as('geometry')
+      })
+      .from(areas)
+      .where(inArray(areas.plotId, plotIds))
+      .orderBy(areas.createdAt)
+  ]);
+
+  type PlotTree = {
+    id: string;
+    latitude: number;
+    longitude: number;
+    treeTypeId: typeof TREE_TYPES[number];
+    healthStatus: typeof HEALTH_STATUSES[number];
+    labels: typeof TREE_LABELS[number][];
+  };
+  type PlotArea = {
+    id: string;
+    comment: string | null;
+    appliedTreeStatus: typeof HEALTH_STATUSES[number] | null;
+  };
+
+  const treesByPlot = new Map<string, PlotTree[]>();
+  for (const t of treeRows) {
+    const list = treesByPlot.get(t.plotId) ?? [];
+    list.push({
+      id: t.id,
+      latitude: Number(t.latitude),
+      longitude: Number(t.longitude),
+      treeTypeId: t.treeTypeId,
+      healthStatus: t.healthStatus,
+      labels: t.labels
+    });
+    treesByPlot.set(t.plotId, list);
+  }
+
+  const areasByPlot = new Map<string, PlotArea[]>();
+  for (const a of areaRows) {
+    const list = areasByPlot.get(a.plotId) ?? [];
+    list.push({
+      id: a.id,
+      comment: a.comment,
+      appliedTreeStatus: a.appliedTreeStatus
+    });
+    areasByPlot.set(a.plotId, list);
+  }
+
+  const plots = plotRows.map((p) => ({
+    id: p.id,
+    name: p.name,
+    trees: treesByPlot.get(p.id) ?? [],
+    areas: areasByPlot.get(p.id) ?? []
+  }));
+
   return { plots };
 };
 
@@ -20,6 +103,11 @@ const schema = z.object({
   instructions: z.string().max(5000).default(''),
   selection: z.discriminatedUnion('type', [
     z.object({ type: z.literal('plot'), plotId: z.string().uuid() }),
+    z.object({
+      type: z.literal('areas'),
+      plotId: z.string().uuid(),
+      areaIds: z.array(z.string().uuid()).min(1)
+    }),
     z.object({ type: z.literal('trees'), treeIds: z.array(z.string().uuid()).min(1) })
   ]),
   visibility: z.object({
@@ -61,6 +149,37 @@ export const actions: Actions = {
       if (!plot) return fail(404, { error: 'Waldstück nicht gefunden.' });
       const rows = await db.select({ id: trees.id }).from(trees).where(eq(trees.plotId, plot.id));
       treeIds = rows.map((r) => r.id);
+    } else if (parsed.selection.type === 'areas') {
+      const [plot] = await db
+        .select({ id: forestPlots.id })
+        .from(forestPlots)
+        .where(and(eq(forestPlots.id, parsed.selection.plotId), eq(forestPlots.ownerId, locals.user.id)))
+        .limit(1);
+      if (!plot) return fail(404, { error: 'Waldstück nicht gefunden.' });
+
+      const areaRows = await db
+        .select({ id: areas.id })
+        .from(areas)
+        .where(and(eq(areas.plotId, plot.id), inArray(areas.id, parsed.selection.areaIds)));
+      const areaIds = areaRows.map((r) => r.id);
+      if (areaIds.length === 0) return fail(400, { error: 'Keine gültigen Bereiche ausgewählt.' });
+
+      // PostGIS: a tree counts if it sits inside ANY of the chosen polygons.
+      const matched = await db.execute(sql`
+        SELECT DISTINCT t.id
+        FROM trees t
+        WHERE t.plot_id = ${plot.id}
+          AND EXISTS (
+            SELECT 1 FROM areas a
+            WHERE a.id = ANY(${areaIds}::uuid[])
+              AND ST_Contains(
+                a.geometry,
+                ST_SetSRID(ST_MakePoint(t.longitude::float8, t.latitude::float8), 4326)
+              )
+          )
+      `);
+      treeIds = (matched as unknown as Array<{ id: string }>).map((r) => r.id);
+      if (treeIds.length === 0) return fail(400, { error: 'In den gewählten Bereichen liegen keine Bäume.' });
     } else {
       const rows = await db
         .select({ id: trees.id })

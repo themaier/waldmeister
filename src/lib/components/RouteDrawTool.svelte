@@ -264,7 +264,7 @@
       >{ROUTE_TYPE_LABELS[routeType]} — Strich {lines.length + 1} mit dem Finger zeichnen</span
     >
     <button
-      class="w-7 h-7 min-h-0 grid place-items-center rounded-full text-earth border-0"
+      class="w-7 h-7 min-h-0 min-w-0 grid place-items-center rounded-full text-earth border-0"
       style="background: color-mix(in srgb, var(--color-earth) 14%, transparent);"
       onclick={onCancel}
       aria-label="Abbrechen"
@@ -324,7 +324,7 @@
           </h2>
         </div>
         <button
-          class="w-9 h-9 min-h-0 grid place-items-center rounded-full bg-transparent border text-content-muted hover:text-ink hover:border-pine"
+          class="w-9 h-9 min-h-0 min-w-0 grid place-items-center rounded-full bg-transparent border text-content-muted hover:text-ink hover:border-pine"
           onclick={onCancel}
           disabled={phase === 'saving'}
           aria-label="Abbrechen"

@@ -1,15 +1,18 @@
 <script lang="ts">
   import type { PageData } from './$types';
   import { goto } from '$app/navigation';
-  import { untrack } from 'svelte';
-  import { ArrowLeft, ArrowRight } from 'phosphor-svelte';
+  import { ArrowLeft, ArrowRight, Tree, Polygon } from 'phosphor-svelte';
+  import { HEALTH_LABELS, HEALTH_COLORS, TREE_TYPE_LABELS, TREE_LABEL_LABELS } from '$lib/enums';
 
   let { data }: { data: PageData } = $props();
 
   let title = $state('');
   let instructions = $state('');
-  // untrack so editing the select isn't clobbered if data re-loads.
-  let plotId = $state(untrack(() => data.plots[0]?.id ?? ''));
+  // Default to no plot selected — user picks one explicitly.
+  let plotId = $state<string>('');
+  let mode = $state<'plot' | 'areas' | 'trees'>('plot');
+  let selectedAreas = $state<Record<string, true>>({});
+  let selectedTrees = $state<Record<string, true>>({});
   let preset = $state<'standard' | 'minimal' | 'custom'>('standard');
   let submitting = $state(false);
   let error = $state<string | null>(null);
@@ -23,6 +26,14 @@
     tree_health: true
   });
 
+  const activePlot = $derived(data.plots.find((p) => p.id === plotId) ?? null);
+
+  function onPlotChange() {
+    selectedAreas = {};
+    selectedTrees = {};
+    mode = 'plot';
+  }
+
   function applyPreset(p: typeof preset) {
     preset = p;
     if (p === 'standard') {
@@ -32,18 +43,42 @@
     }
   }
 
+  function toggleArea(id: string) {
+    if (selectedAreas[id]) delete selectedAreas[id];
+    else selectedAreas[id] = true;
+  }
+  function toggleTree(id: string) {
+    if (selectedTrees[id]) delete selectedTrees[id];
+    else selectedTrees[id] = true;
+  }
+
+  const selectedAreaIds = $derived(Object.keys(selectedAreas));
+  const selectedTreeIds = $derived(Object.keys(selectedTrees));
+
   async function submit(e: SubmitEvent) {
     e.preventDefault();
     error = null;
     if (!title.trim()) { error = 'Bitte einen Titel eingeben.'; return; }
     if (!plotId) { error = 'Bitte ein Waldstück auswählen.'; return; }
+
+    let selection: Record<string, unknown>;
+    if (mode === 'plot') {
+      selection = { type: 'plot', plotId };
+    } else if (mode === 'areas') {
+      if (selectedAreaIds.length === 0) { error = 'Bitte mindestens einen Bereich auswählen.'; return; }
+      selection = { type: 'areas', plotId, areaIds: selectedAreaIds };
+    } else {
+      if (selectedTreeIds.length === 0) { error = 'Bitte mindestens einen Baum auswählen.'; return; }
+      selection = { type: 'trees', treeIds: selectedTreeIds };
+    }
+
     submitting = true;
     try {
       const fd = new FormData();
       fd.set('payload', JSON.stringify({
         title: title.trim(),
         instructions,
-        selection: { type: 'plot', plotId },
+        selection,
         visibility: vis
       }));
       const res = await fetch('', { method: 'POST', body: fd });
@@ -69,7 +104,7 @@
       <a
         href="/auftraege"
         aria-label="Zurück"
-        class="w-[38px] h-[38px] min-h-0 grid place-items-center rounded-btn border bg-surface text-ink hover:border-pine transition"
+        class="w-[38px] h-[38px] min-h-0 min-w-0 grid place-items-center rounded-btn border bg-surface text-ink hover:border-pine transition"
       >
         <ArrowLeft size="1.125em" weight="bold" />
       </a>
@@ -125,8 +160,10 @@
         <select
           class="w-full px-4 py-3 min-h-[48px] rounded-btn border bg-earth text-[0.9375rem] text-ink focus:outline-none focus:border-pine focus:shadow-ring-focus transition"
           bind:value={plotId}
+          onchange={onPlotChange}
           required
         >
+          <option value="" disabled>— bitte wählen —</option>
           {#each data.plots as p}
             <option value={p.id}>{p.name ?? `Waldstück ${p.id.slice(0, 6)}`}</option>
           {/each}
@@ -134,10 +171,125 @@
       </label>
     </section>
 
+    {#if activePlot}
+      <section class="paper px-5 py-5 flex flex-col gap-4">
+        <h2
+          class="font-serif font-medium text-[1.0625rem] tracking-tight text-ink m-0 section-numeral"
+          data-num="02"
+          style="font-variation-settings: 'opsz' 96, 'SOFT' 40, 'WONK' 1;"
+        >
+          Auswahl
+        </h2>
+
+        <div class="inline-flex p-1 bg-earth border rounded-pill self-start flex-wrap">
+          <button
+            type="button"
+            class="px-4 py-2 min-h-0 min-w-0 rounded-pill text-[0.8125rem] font-semibold transition {mode === 'plot' ? 'text-earth bg-pine' : 'text-content-muted'}"
+            onclick={() => (mode = 'plot')}
+          >
+            Ganzes Waldstück
+          </button>
+          <button
+            type="button"
+            class="px-4 py-2 min-h-0 min-w-0 rounded-pill text-[0.8125rem] font-semibold transition {mode === 'areas' ? 'text-earth bg-pine' : 'text-content-muted'}"
+            disabled={activePlot.areas.length === 0}
+            onclick={() => (mode = 'areas')}
+          >
+            Bereiche {activePlot.areas.length ? `(${activePlot.areas.length})` : ''}
+          </button>
+          <button
+            type="button"
+            class="px-4 py-2 min-h-0 min-w-0 rounded-pill text-[0.8125rem] font-semibold transition {mode === 'trees' ? 'text-earth bg-pine' : 'text-content-muted'}"
+            disabled={activePlot.trees.length === 0}
+            onclick={() => (mode = 'trees')}
+          >
+            Einzelne Bäume {activePlot.trees.length ? `(${activePlot.trees.length})` : ''}
+          </button>
+        </div>
+
+        {#if mode === 'plot'}
+          <p class="text-sm text-content-muted leading-relaxed">
+            Alle {activePlot.trees.length} Bäume in diesem Waldstück werden in den Auftrag aufgenommen.
+          </p>
+        {:else if mode === 'areas'}
+          {#if activePlot.areas.length === 0}
+            <p class="text-sm text-content-muted">Für dieses Waldstück sind keine Bereiche eingezeichnet.</p>
+          {:else}
+            <ul class="flex flex-col divide-y divide-hairline border rounded-btn overflow-hidden bg-earth">
+              {#each activePlot.areas as a}
+                <li>
+                  <label class="flex items-center gap-3 px-4 py-3 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      class="checkbox checkbox-sm"
+                      checked={!!selectedAreas[a.id]}
+                      onchange={() => toggleArea(a.id)}
+                    />
+                    <span class="grid place-items-center w-8 h-8 rounded-btn border border-hairline text-pine">
+                      <Polygon size="1em" weight="duotone" />
+                    </span>
+                    <span class="flex-1 min-w-0 flex flex-col">
+                      <span class="text-sm text-ink truncate">{a.comment?.trim() || 'Bereich ohne Kommentar'}</span>
+                      {#if a.appliedTreeStatus}
+                        <span class="text-xs text-content-muted">
+                          Angewandter Status: <span class="font-semibold" style="color: {HEALTH_COLORS[a.appliedTreeStatus]};">{HEALTH_LABELS[a.appliedTreeStatus]}</span>
+                        </span>
+                      {/if}
+                    </span>
+                  </label>
+                </li>
+              {/each}
+            </ul>
+            <p class="text-xs text-content-muted">
+              {selectedAreaIds.length} Bereich{selectedAreaIds.length === 1 ? '' : 'e'} ausgewählt — alle darin liegenden Bäume gehen in den Auftrag.
+            </p>
+          {/if}
+        {:else}
+          {#if activePlot.trees.length === 0}
+            <p class="text-sm text-content-muted">Für dieses Waldstück sind keine Bäume erfasst.</p>
+          {:else}
+            <ul class="flex flex-col divide-y divide-hairline border rounded-btn overflow-hidden bg-earth max-h-[420px] overflow-y-auto">
+              {#each activePlot.trees as t}
+                <li>
+                  <label class="flex items-center gap-3 px-4 py-3 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      class="checkbox checkbox-sm"
+                      checked={!!selectedTrees[t.id]}
+                      onchange={() => toggleTree(t.id)}
+                    />
+                    <span
+                      class="grid place-items-center w-8 h-8 rounded-btn border border-hairline"
+                      style="color: {HEALTH_COLORS[t.healthStatus]};"
+                    >
+                      <Tree size="1em" weight="duotone" />
+                    </span>
+                    <span class="flex-1 min-w-0 flex flex-col">
+                      <span class="text-sm text-ink truncate">
+                        {TREE_TYPE_LABELS[t.treeTypeId]} · <span style="color: {HEALTH_COLORS[t.healthStatus]};">{HEALTH_LABELS[t.healthStatus]}</span>
+                      </span>
+                      {#if t.labels.length}
+                        <span class="text-xs text-content-muted truncate">
+                          {t.labels.map((l) => TREE_LABEL_LABELS[l]).join(' · ')}
+                        </span>
+                      {/if}
+                    </span>
+                  </label>
+                </li>
+              {/each}
+            </ul>
+            <p class="text-xs text-content-muted">
+              {selectedTreeIds.length} Baum{selectedTreeIds.length === 1 ? '' : 'e'} ausgewählt.
+            </p>
+          {/if}
+        {/if}
+      </section>
+    {/if}
+
     <section class="paper px-5 py-5 flex flex-col gap-4">
       <h2
         class="font-serif font-medium text-[1.0625rem] tracking-tight text-ink m-0 section-numeral"
-        data-num="02"
+        data-num={activePlot ? '03' : '02'}
         style="font-variation-settings: 'opsz' 96, 'SOFT' 40, 'WONK' 1;"
       >
         Was soll der Empfänger sehen?
@@ -147,7 +299,7 @@
         {#each ['standard', 'minimal', 'custom'] as p}
           <button
             type="button"
-            class="px-4 py-2 min-h-0 rounded-pill text-[0.8125rem] font-semibold transition {preset === p ? 'text-earth bg-pine' : 'text-content-muted'}"
+            class="px-4 py-2 min-h-0 min-w-0 rounded-pill text-[0.8125rem] font-semibold transition {preset === p ? 'text-earth bg-pine' : 'text-content-muted'}"
             onclick={() => applyPreset(p as typeof preset)}
           >
             {p === 'standard' ? 'Standard' : p === 'minimal' ? 'Nur das Nötigste' : 'Benutzerdefiniert'}

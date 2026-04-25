@@ -321,14 +321,14 @@
 
       {#if selectionCount > 0}
         <ul class="flex flex-col gap-1 max-h-40 overflow-auto">
-          {#each selectedIds as cid (cid)}
+          {#each selectedIds as cid, i (cid)}
             <li
               class="flex items-center justify-between gap-2 bg-earth border px-3 py-2 rounded-btn"
             >
-              <span class="mono text-sm text-content">{cid}</span>
+              <span class="text-sm text-content">Flurstück {i + 1}</span>
               <button
                 type="button"
-                class="w-8 h-8 min-h-0 grid place-items-center rounded-full text-content-muted hover:text-crimson hover:bg-surface-muted transition"
+                class="w-8 h-8 min-h-0 min-w-0 grid place-items-center rounded-full text-content-muted hover:text-crimson hover:bg-surface-muted transition"
                 onclick={() => removeSelected(cid)}
                 aria-label="Entfernen"
               >

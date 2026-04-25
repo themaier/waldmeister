@@ -1,9 +1,19 @@
 <script lang="ts">
   import type { PageData } from './$types';
-  import { ArrowLeft, Tree, MapPin, Camera, Polygon, PencilSimple, Trash } from 'phosphor-svelte';
+  import { invalidateAll } from '$app/navigation';
+  import { ArrowLeft, Tree, MapPin, Camera, Polygon, PencilSimple, Trash, Plus, MapTrifold } from 'phosphor-svelte';
   import { renamePlot, deletePlot } from '../../plots.remote';
+  import { createBoundaryStone, deleteBoundaryStone, updateBoundaryStone } from '../../boundary-stones.remote';
 
   let { data }: { data: PageData } = $props();
+
+  let stoneFile = $state<File | null>(null);
+  let stonePreview = $state<string | null>(null);
+  let stoneDescription = $state('');
+  let stoneCaptureGps = $state(true);
+  let stoneSubmitting = $state(false);
+  let stoneError = $state<string | null>(null);
+  let editing = $state<Record<string, string>>({});
 
   async function rename() {
     const name = prompt('Name', data.plot.name ?? '');
@@ -16,6 +26,105 @@
     if (!confirm('Waldstück und alle enthaltenen Daten (Bäume, Bereiche, Fotos, Anfahrten) löschen?')) return;
     await deletePlot(data.plot.id);
     location.href = '/';
+  }
+
+  async function imageSize(url: string): Promise<{ width: number; height: number }> {
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.onload = () => resolve({ width: img.naturalWidth, height: img.naturalHeight });
+      img.src = url;
+    });
+  }
+
+  function pickStoneFile(e: Event) {
+    const input = e.target as HTMLInputElement;
+    const f = input.files?.[0];
+    if (!f) return;
+    if (stonePreview) URL.revokeObjectURL(stonePreview);
+    stoneFile = f;
+    stonePreview = URL.createObjectURL(f);
+    input.value = '';
+  }
+
+  function clearStoneDraft() {
+    if (stonePreview) URL.revokeObjectURL(stonePreview);
+    stoneFile = null;
+    stonePreview = null;
+    stoneDescription = '';
+    stoneError = null;
+  }
+
+  async function getGpsOnce(): Promise<{ lat: number; lng: number; acc: number } | null> {
+    if (!('geolocation' in navigator)) return null;
+    return new Promise((resolve) => {
+      navigator.geolocation.getCurrentPosition(
+        (pos) => resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude, acc: pos.coords.accuracy }),
+        () => resolve(null),
+        { enableHighAccuracy: true, timeout: 8000 }
+      );
+    });
+  }
+
+  async function submitStone() {
+    if (!stoneFile || !stonePreview) {
+      stoneError = 'Bitte ein Foto auswählen.';
+      return;
+    }
+    stoneSubmitting = true;
+    stoneError = null;
+    try {
+      const { width, height } = await imageSize(stonePreview);
+      const gps = stoneCaptureGps ? await getGpsOnce() : null;
+
+      let result: { id: string; uploadUrl: string };
+      try {
+        result = await createBoundaryStone({
+          plotId: data.plot.id,
+          description: stoneDescription,
+          latitude: gps?.lat ?? null,
+          longitude: gps?.lng ?? null,
+          gpsAccuracyM: gps?.acc ?? null,
+          contentType: stoneFile.type || 'image/jpeg',
+          widthPx: width,
+          heightPx: height
+        });
+      } catch (e) {
+        stoneError = (e as { message?: string }).message ?? 'Speichern fehlgeschlagen.';
+        return;
+      }
+
+      if (result.uploadUrl) {
+        await fetch(result.uploadUrl, {
+          method: 'PUT',
+          headers: { 'content-type': stoneFile.type || 'image/jpeg' },
+          body: stoneFile
+        });
+      }
+
+      clearStoneDraft();
+      await invalidateAll();
+    } finally {
+      stoneSubmitting = false;
+    }
+  }
+
+  async function removeStone(id: string) {
+    if (!confirm('Diesen Grenzstein löschen?')) return;
+    await deleteBoundaryStone(id);
+    await invalidateAll();
+  }
+
+  function startEdit(id: string, current: string) {
+    editing[id] = current;
+  }
+  function cancelEdit(id: string) {
+    delete editing[id];
+  }
+  async function saveEdit(id: string) {
+    const text = editing[id] ?? '';
+    await updateBoundaryStone({ id, description: text });
+    delete editing[id];
+    await invalidateAll();
   }
 
   const stats = $derived([
@@ -32,7 +141,7 @@
       <a
         href="/"
         aria-label="Zurück zur Karte"
-        class="w-[38px] h-[38px] min-h-0 grid place-items-center rounded-btn border bg-surface text-ink hover:border-pine transition"
+        class="w-[38px] h-[38px] min-h-0 min-w-0 grid place-items-center rounded-btn border bg-surface text-ink hover:border-pine transition"
       >
         <ArrowLeft size="1.125em" weight="bold" />
       </a>
@@ -73,10 +182,164 @@
       {/each}
     </section>
 
+    <section class="paper px-5 py-5 flex flex-col gap-4">
+      <div class="flex items-baseline justify-between gap-3">
+        <h2
+          class="font-serif font-medium text-[1.0625rem] tracking-tight text-ink m-0 section-numeral"
+          data-num="01"
+          style="font-variation-settings: 'opsz' 96, 'SOFT' 40, 'WONK' 1;"
+        >
+          Grenzsteine
+        </h2>
+        <span class="eyebrow">{data.counts.stones} erfasst</span>
+      </div>
+      <p class="text-sm text-content-muted leading-relaxed">
+        Foto, Beschreibung und (optional) Standort jedes Grenzsteins.
+      </p>
+
+      {#if data.boundaryStones.length > 0}
+        <ul class="flex flex-col gap-3">
+          {#each data.boundaryStones as st (st.id)}
+            <li class="flex gap-3 items-start border border-hairline rounded-btn p-3 bg-earth">
+              {#if st.url}
+                <a href={st.url} target="_blank" rel="noopener" class="block flex-shrink-0">
+                  <img
+                    src={st.url}
+                    alt="Grenzstein"
+                    class="w-24 h-24 object-cover rounded-btn border"
+                  />
+                </a>
+              {:else}
+                <div class="w-24 h-24 rounded-btn border border-dashed grid place-items-center text-content-faint flex-shrink-0">
+                  <Camera size="1.25em" />
+                </div>
+              {/if}
+              <div class="flex-1 min-w-0 flex flex-col gap-2">
+                {#if editing[st.id] !== undefined}
+                  <textarea
+                    class="w-full px-3 py-2 min-h-[64px] rounded-btn border bg-surface text-[0.9rem] text-ink focus:outline-none focus:border-pine focus:shadow-ring-focus transition"
+                    rows="3"
+                    bind:value={editing[st.id]}
+                  ></textarea>
+                  <div class="flex gap-2">
+                    <button
+                      class="px-3 py-1.5 min-h-[36px] rounded-btn text-earth border font-semibold text-xs"
+                      style="background: linear-gradient(180deg, var(--color-pine), var(--color-pine-deep)); border-color: var(--color-pine-deep);"
+                      onclick={() => saveEdit(st.id)}
+                    >
+                      Speichern
+                    </button>
+                    <button
+                      class="px-3 py-1.5 min-h-[36px] rounded-btn bg-surface border text-content text-xs font-semibold"
+                      onclick={() => cancelEdit(st.id)}
+                    >
+                      Abbrechen
+                    </button>
+                  </div>
+                {:else}
+                  <p class="text-sm text-ink whitespace-pre-wrap leading-snug min-h-[1em]">
+                    {st.description?.trim() || '— keine Beschreibung —'}
+                  </p>
+                {/if}
+                <div class="flex flex-wrap items-center gap-2 text-xs text-content-muted">
+                  {#if st.latitude !== null && st.longitude !== null}
+                    <span class="inline-flex items-center gap-1 font-mono">
+                      <MapTrifold size="0.875em" />
+                      {st.latitude.toFixed(5)}, {st.longitude.toFixed(5)}
+                      {#if st.gpsAccuracyM != null}· ±{st.gpsAccuracyM.toFixed(0)} m{/if}
+                    </span>
+                  {:else}
+                    <span class="italic">ohne Standort</span>
+                  {/if}
+                </div>
+                {#if editing[st.id] === undefined}
+                  <div class="flex gap-2">
+                    <button
+                      class="inline-flex items-center gap-1 px-2 py-1 min-h-[32px] rounded-btn border text-content text-xs hover:border-pine transition"
+                      onclick={() => startEdit(st.id, st.description)}
+                    >
+                      <PencilSimple size="0.875em" /> Beschreibung
+                    </button>
+                    <button
+                      class="inline-flex items-center gap-1 px-2 py-1 min-h-[32px] rounded-btn border text-crimson text-xs hover:border-crimson transition"
+                      onclick={() => removeStone(st.id)}
+                    >
+                      <Trash size="0.875em" /> Löschen
+                    </button>
+                  </div>
+                {/if}
+              </div>
+            </li>
+          {/each}
+        </ul>
+      {/if}
+
+      <!-- Add new -->
+      <div class="border border-dashed border-hairline rounded-btn p-4 flex flex-col gap-3">
+        <span class="eyebrow">Neuer Grenzstein</span>
+
+        {#if stoneError}
+          <div class="alert alert-error text-xs">{stoneError}</div>
+        {/if}
+
+        {#if stonePreview}
+          <img
+            src={stonePreview}
+            alt="Vorschau"
+            class="w-full max-w-[240px] h-auto rounded-btn border self-start"
+          />
+        {/if}
+
+        <label class="inline-flex items-center justify-center gap-2 px-3 py-2 min-h-[44px] rounded-btn bg-surface border text-ink text-sm font-semibold cursor-pointer hover:border-pine transition self-start">
+          <Camera size="1em" />
+          {stonePreview ? 'Anderes Foto' : 'Foto auswählen'}
+          <input
+            type="file"
+            accept="image/*"
+            capture="environment"
+            class="sr-only"
+            onchange={pickStoneFile}
+          />
+        </label>
+
+        <textarea
+          class="w-full px-3 py-2 min-h-[64px] rounded-btn border bg-surface text-[0.9rem] text-ink focus:outline-none focus:border-pine focus:shadow-ring-focus transition"
+          rows="2"
+          placeholder="Beschreibung (z. B. Lage, Markierungen)"
+          bind:value={stoneDescription}
+        ></textarea>
+
+        <label class="flex items-center gap-2 text-xs text-content cursor-pointer">
+          <input type="checkbox" class="checkbox checkbox-sm" bind:checked={stoneCaptureGps} />
+          <span>Aktuellen Standort mitspeichern</span>
+        </label>
+
+        <div class="flex gap-2">
+          <button
+            class="inline-flex items-center gap-2 px-4 py-2 min-h-[40px] rounded-btn text-earth border font-semibold text-sm shadow-duff transition hover:-translate-y-px hover:shadow-understory disabled:opacity-70 disabled:cursor-not-allowed"
+            style="background: linear-gradient(180deg, var(--color-pine), var(--color-pine-deep)); border-color: var(--color-pine-deep);"
+            onclick={submitStone}
+            disabled={stoneSubmitting || !stoneFile}
+          >
+            <Plus size="1em" weight="bold" />
+            {stoneSubmitting ? 'Speichern …' : 'Hinzufügen'}
+          </button>
+          {#if stoneFile}
+            <button
+              class="inline-flex items-center gap-2 px-3 py-2 min-h-[40px] rounded-btn bg-surface border text-content text-sm font-semibold"
+              onclick={clearStoneDraft}
+            >
+              Verwerfen
+            </button>
+          {/if}
+        </div>
+      </div>
+    </section>
+
     <section class="paper px-5 py-5 flex flex-col gap-3">
       <h2
         class="font-serif font-medium text-[1.0625rem] tracking-tight text-ink m-0 section-numeral"
-        data-num="01"
+        data-num="02"
         style="font-variation-settings: 'opsz' 96, 'SOFT' 40, 'WONK' 1;"
       >
         Aktionen

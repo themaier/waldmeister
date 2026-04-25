@@ -264,6 +264,29 @@ export const treeImages = pgTable('tree_images', {
   treeIdx: index('tree_images_tree_idx').on(t.treeId)
 }));
 
+// --- §4.8b Boundary stones (Grenzsteine) ---
+// One row per photographed boundary stone. Description is free-text; GPS is
+// optional because a phone may capture without lock. Each stone owns a single
+// photo — re-take = new row, keeping history simple.
+export const boundaryStones = pgTable('boundary_stones', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  plotId: uuid('plot_id')
+    .notNull()
+    .references(() => forestPlots.id, { onDelete: 'cascade' }),
+  s3Key: text('s3_key').notNull(),
+  description: text('description').notNull().default(''),
+  latitude: numeric('latitude', { precision: 10, scale: 7 }),
+  longitude: numeric('longitude', { precision: 10, scale: 7 }),
+  gpsAccuracyM: numeric('gps_accuracy_m', { precision: 8, scale: 2 }),
+  widthPx: integer('width_px').notNull(),
+  heightPx: integer('height_px').notNull(),
+  takenAt: timestamp('taken_at').notNull().defaultNow(),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow()
+}, (t) => ({
+  plotIdx: index('boundary_stones_plot_idx').on(t.plotId)
+}));
+
 // --- §4.9 Work Orders ---
 export const workOrders = pgTable('work_orders', {
   id: uuid('id').primaryKey().defaultRandom(),
@@ -322,5 +345,6 @@ export type Area = typeof areas.$inferSelect;
 export type AreaImage = typeof areaImages.$inferSelect;
 export type Tree = typeof trees.$inferSelect;
 export type TreeImage = typeof treeImages.$inferSelect;
+export type BoundaryStone = typeof boundaryStones.$inferSelect;
 export type WorkOrder = typeof workOrders.$inferSelect;
 export type WorkOrderTree = typeof workOrderTrees.$inferSelect;

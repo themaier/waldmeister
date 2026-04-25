@@ -2,9 +2,10 @@
   import type { PageData } from './$types';
   import { invalidateAll } from '$app/navigation';
   import { page } from '$app/state';
-  import { CheckCircle, WarningCircle, Question, Tree, Path } from 'phosphor-svelte';
-  import { HEALTH_LABELS, HEALTH_COLORS, TREE_LABEL_LABELS, type HealthStatus, type TreeLabel } from '$lib/enums';
+  import { CheckCircle, WarningCircle, Question, Tree } from 'phosphor-svelte';
+  import { HEALTH_LABELS, TREE_LABEL_LABELS, type HealthStatus, type TreeLabel } from '$lib/enums';
   import { saveContractorNotes, updateContractorTreeStatus } from './contractor.remote';
+  import ContractorTaskMap from '$lib/components/ContractorTaskMap.svelte';
 
   let { data }: { data: PageData } = $props();
 
@@ -103,39 +104,26 @@
       </section>
     {/if}
 
-    {#if data.routes.length > 0}
+    {#if data.routes.length > 0 || data.areas.length > 0 || data.trees.length > 0}
       <section class="paper px-5 py-5 flex flex-col gap-3">
         <h2
           class="font-serif font-medium text-[1.0625rem] tracking-tight text-ink m-0 section-numeral"
           data-num="01"
           style="font-variation-settings: 'opsz' 96, 'SOFT' 40, 'WONK' 1;"
         >
-          Wege
+          Übersicht
         </h2>
-        <ul class="list-none p-0 m-0 flex flex-col gap-3">
-          {#each data.routes as r}
-            <li class="flex items-start gap-3 pb-3 border-b border-hairline last:border-0 last:pb-0">
-              <span
-                class="mt-1 w-8 h-8 grid place-items-center rounded-btn text-pine border border-hairline"
-                style="background: color-mix(in srgb, var(--color-pine) 8%, transparent);"
-              >
-                <Path size="1em" weight="bold" />
-              </span>
-              <div class="flex-1 min-w-0">
-                <div class="flex flex-wrap items-center gap-2">
-                  <span class="chip-ghost">{r.routeType === 'anfahrt' ? 'Anfahrt' : 'Rückegasse'}</span>
-                  <span class="text-sm font-semibold text-ink">{r.name ?? '–'}</span>
-                  <span class="text-xs text-content-muted">
-                    {r.vehicleType === 'großgerät' ? 'auch Großgerät' : 'Kleingerät'}
-                  </span>
-                </div>
-                {#if r.comment}
-                  <p class="text-xs text-content-muted mt-1">{r.comment}</p>
-                {/if}
-              </div>
-            </li>
-          {/each}
-        </ul>
+        <ContractorTaskMap
+          routes={data.routes}
+          trees={data.trees}
+          areas={data.areas}
+          highlightedAreaIds={data.order.selection?.type === 'areas' ? data.order.selection.areaIds : null}
+        />
+        {#if data.routes.length > 0}
+          <p class="text-xs text-content-muted leading-relaxed">
+            Der hervorgehobene Weg führt am nächsten an die zu bearbeitenden Bäume bzw. Bereiche heran. Andere Wege sind abgedunkelt dargestellt.
+          </p>
+        {/if}
       </section>
     {/if}
 
