@@ -284,14 +284,14 @@
   async function addPhoto(e: Event) {
     const input = e.target as HTMLInputElement;
     if (!input.files) return;
-    // Capture GPS at photo time; wait at least 1s for a better fix.
-    // Fire-and-forget: we still accept the photo even if GPS fails.
-    if (!gpsCapturing) {
+    // Optional: refine GPS while adding a photo — only in auto mode. After the
+    // user taps the map (manual placement), GPS must not run until "GPS holen".
+    if (!gpsCapturing && gpsMode === 'auto') {
       gpsCapturing = true;
       getBetterGpsFix({ minWaitMs: 3000, maxWaitMs: 6500, desiredAccuracyM: 10 })
         .then((fix) => {
           if (!fix) return;
-          gpsMode = 'auto';
+          if (gpsMode !== 'auto') return;
           latitude = fix.lat;
           longitude = fix.lng;
           gpsAccuracyM = fix.acc;
