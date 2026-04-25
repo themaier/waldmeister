@@ -15,7 +15,6 @@
   let mode = $state<'plot' | 'areas' | 'trees'>('plot');
   let selectedAreas = $state<Record<string, true>>({});
   let selectedTrees = $state<Record<string, true>>({});
-  let preset = $state<'standard' | 'minimal' | 'custom'>('standard');
   let submitting = $state(false);
   let error = $state<string | null>(null);
   let shareOverlay = $state<{ orderId: string | null; shareUrl: string | null; title: string } | null>(null);
@@ -38,22 +37,6 @@
     selectedAreas = {};
     selectedTrees = {};
     mode = 'plot';
-  }
-
-  function applyPreset(p: typeof preset) {
-    preset = p;
-    if (p === 'standard') {
-      vis = {
-        anfahrten: true,
-        plot_photos: true,
-        areas: true,
-        tree_photos: true,
-        tree_descriptions: true,
-        tree_health: true
-      };
-    } else if (p === 'minimal') {
-      vis = { anfahrten: true, plot_photos: false, areas: false, tree_photos: false, tree_descriptions: false, tree_health: false };
-    }
   }
 
   function toggleArea(id: string) {
@@ -349,32 +332,18 @@
         Was soll der Empfänger sehen?
       </h2>
 
-      <div class="inline-flex p-1 bg-earth border rounded-pill self-start">
-        {#each ['standard', 'minimal', 'custom'] as p}
-          <button
-            type="button"
-            class="px-4 py-2 min-h-0 min-w-0 rounded-pill text-[0.8125rem] font-semibold transition {preset === p ? 'text-earth bg-pine' : 'text-content-muted'}"
-            onclick={() => applyPreset(p as typeof preset)}
-          >
-            {p === 'standard' ? 'Standard' : p === 'minimal' ? 'Nur das Nötigste' : 'Benutzerdefiniert'}
-          </button>
+      <div class="flex flex-col gap-2">
+        {#each visOptions as opt}
+          <label class="flex items-center justify-between gap-3 py-2 cursor-pointer">
+            <span class="text-sm text-content">{opt.label}</span>
+            <input
+              type="checkbox"
+              class="toggle toggle-primary toggle-sm"
+              bind:checked={vis[opt.key as keyof typeof vis]}
+            />
+          </label>
         {/each}
       </div>
-
-      {#if preset === 'custom'}
-        <div class="flex flex-col gap-2 pt-2 border-t border-hairline">
-          {#each visOptions as opt}
-            <label class="flex items-center justify-between gap-3 py-2 cursor-pointer">
-              <span class="text-sm text-content">{opt.label}</span>
-              <input
-                type="checkbox"
-                class="toggle toggle-primary toggle-sm"
-                bind:checked={vis[opt.key as keyof typeof vis]}
-              />
-            </label>
-          {/each}
-        </div>
-      {/if}
 
       <p class="text-xs text-content-muted leading-relaxed">
         Die Label-Aufgaben (Fällen / Markieren / Zaun bauen / Entasten) sind immer sichtbar — sie beschreiben die Arbeit.

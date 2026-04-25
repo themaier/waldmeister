@@ -10,6 +10,7 @@
   let svgRef = $state<SVGSVGElement | undefined>();
   let shoulderDeg = $state(8);
   let forearmDeg = $state(-40);
+  let staffY = $state(0);
 
   const PIVOT_X = 305;
   const PIVOT_Y = 268;
@@ -24,28 +25,49 @@
       const r = svgRef!.getBoundingClientRect();
       if (r.width === 0 || r.height === 0) return;
       const scale = r.height / VIEW_H;
-      const sx = r.left + (PIVOT_X / VIEW_W) * r.width;
-      const sy = r.top + (PIVOT_Y / VIEW_H) * r.height;
-      const dx = (e.clientX - sx) / scale;
-      const dy = (e.clientY - sy) / scale;
 
-      let a1 = Math.atan2(dy, dx);
-      a1 = Math.max(-Math.PI / 2.2, Math.min(Math.PI / 2.2, a1));
+      // Split the figure at the right-shoulder pivot, not the viewbox center:
+      // any cursor left of the pivot has a negative dx and otherwise whips the
+      // upper arm backwards into the face. Left of pivot → staff bob only;
+      // right of pivot → pointing arm only.
+      const vbX = ((e.clientX - r.left) / r.width) * VIEW_W;
+      const vbY = ((e.clientY - r.top) / r.height) * VIEW_H;
+      const onLeft = vbX < PIVOT_X;
 
-      const rightTarget = window.innerWidth * 1.06;
-      const ext = Math.max(0, Math.min(1, (e.clientX - sx) / Math.max(1, rightTarget - sx)));
+      if (onLeft) {
+        staffY = Math.max(-70, Math.min(70, (vbY - 400) * 0.18));
+      } else {
+        staffY = 0;
 
-      const minD = Math.max(Math.abs(L1 - L2) + 8, 50);
-      const maxD = L1 + L2 - 4;
-      const d = minD + ext * (maxD - minD);
+        const sx = r.left + (PIVOT_X / VIEW_W) * r.width;
+        const sy = r.top + (PIVOT_Y / VIEW_H) * r.height;
+        const dx = (e.clientX - sx) / scale;
+        const dy = (e.clientY - sy) / scale;
 
-      const cosShoulder = (L1 * L1 + d * d - L2 * L2) / (2 * L1 * d);
-      const cosElbow = (L1 * L1 + L2 * L2 - d * d) / (2 * L1 * L2);
-      const shoulderInner = Math.acos(Math.max(-1, Math.min(1, cosShoulder)));
-      const elbowInner = Math.acos(Math.max(-1, Math.min(1, cosElbow)));
+        let a1 = Math.atan2(dy, dx);
+        a1 = Math.max(-Math.PI / 2.2, Math.min(Math.PI / 2.2, a1));
 
-      shoulderDeg = ((a1 + shoulderInner) * 180) / Math.PI;
-      forearmDeg = (-(Math.PI - elbowInner) * 180) / Math.PI;
+        const rightTarget = window.innerWidth * 1.06;
+        const ext = Math.max(0, Math.min(1, (e.clientX - sx) / Math.max(1, rightTarget - sx)));
+
+        const minD = Math.max(Math.abs(L1 - L2) + 8, 50);
+        const maxD = L1 + L2 - 4;
+        const d = minD + ext * (maxD - minD);
+
+        const cosShoulder = (L1 * L1 + d * d - L2 * L2) / (2 * L1 * d);
+        const cosElbow = (L1 * L1 + L2 * L2 - d * d) / (2 * L1 * L2);
+        const shoulderInner = Math.acos(Math.max(-1, Math.min(1, cosShoulder)));
+        const elbowInner = Math.acos(Math.max(-1, Math.min(1, cosElbow)));
+
+        // Cap the upper-arm rotation between vertical-up (-90°) and
+        // vertical-down (90°). The IK math can otherwise resolve to angles
+        // past ±90° for cursor positions close to the shoulder — visually
+        // this folds the arm back into the head/face. Clamping on both sides
+        // keeps the upper arm in the natural side-pointing half-plane.
+        const rawShoulder = ((a1 + shoulderInner) * 180) / Math.PI;
+        shoulderDeg = Math.max(-90, Math.min(90, rawShoulder));
+        forearmDeg = (-(Math.PI - elbowInner) * 180) / Math.PI;
+      }
     };
     window.addEventListener('mousemove', onMove, { passive: true });
     return () => window.removeEventListener('mousemove', onMove);
@@ -68,8 +90,9 @@
       <stop offset="100%" stop-color="#070d09" />
     </linearGradient>
     <linearGradient id="m-cloak-arm" x1="0" y1="0" x2="1" y2="0">
-      <stop offset="0%" stop-color="#1c3826" />
-      <stop offset="100%" stop-color="#0b1610" />
+      <stop offset="0%" stop-color="#28503a" />
+      <stop offset="60%" stop-color="#244934" />
+      <stop offset="100%" stop-color="#1d3d2a" />
     </linearGradient>
     <linearGradient id="m-wood" x1="0" y1="0" x2="0" y2="1">
       <stop offset="0%" stop-color="#6b4a32" />
@@ -79,6 +102,11 @@
       <stop offset="0%" stop-color="#b89a72" />
       <stop offset="60%" stop-color="#8a6e4c" />
       <stop offset="100%" stop-color="#5a4128" />
+    </linearGradient>
+    <linearGradient id="m-beard" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#8a8275" />
+      <stop offset="60%" stop-color="#5a5346" />
+      <stop offset="100%" stop-color="#2e2820" />
     </linearGradient>
     <linearGradient id="m-dome" x1="0" y1="0" x2="0" y2="1">
       <stop offset="0%" stop-color="#3d5b30" />
@@ -121,20 +149,63 @@
 
   <!-- Cloak fold lines -->
   <path d="M 196 320 L 168 752" stroke="#070d09" stroke-width="1.4" opacity="0.55" fill="none" />
-  <path d="M 220 340 L 215 760" stroke="#070d09" stroke-width="1" opacity="0.4" fill="none" />
-  <path d="M 240 340 L 240 762" stroke="#070d09" stroke-width="0.9" opacity="0.35" fill="none" />
-  <path d="M 260 340 L 265 760" stroke="#070d09" stroke-width="1" opacity="0.4" fill="none" />
   <path d="M 284 320 L 312 752" stroke="#070d09" stroke-width="1.4" opacity="0.55" fill="none" />
 
-  <!-- Head — ellipse covering the cloak's top closure entirely -->
-  <ellipse cx="240" cy="210" rx="46" ry="42" fill="url(#m-skin)" />
-  <!-- Darker shading on top of head, blended downward -->
+  <!-- Head — slimmer ellipse, sized to sit inside the beard wrap -->
+  <ellipse cx="240" cy="210" rx="40" ry="40" fill="url(#m-skin)" />
+  <!-- Tapered jaw extension — narrower so no skin pokes out past the beard sideburns -->
   <path
-    d="M 194 210 A 46 42 0 0 1 286 210 Z"
-    fill="#2a1a0d"
-    opacity="0.55"
+    d="M 206 238
+       C 210 250, 218 258, 226 260
+       L 254 260
+       C 262 258, 270 250, 274 238
+       C 264 246, 252 248, 240 248
+       C 228 248, 216 246, 206 238 Z"
+    fill="url(#m-skin)"
   />
-  <ellipse cx="240" cy="186" rx="40" ry="14" fill="#1a0e06" opacity="0.45" />
+  <ellipse cx="240" cy="190" rx="34" ry="14" fill="#1a0e06" opacity="0.5" />
+
+  <!-- Beard — narrower wrap, sideburns reach the hat brim but stay tight to the jaw for a sharper face -->
+  <path
+    d="M 206 220
+       C 200 236, 204 256, 214 268
+       C 216 282, 220 294, 222 300
+       L 222 290
+       L 226 304
+       L 230 292
+       L 234 308
+       L 238 296
+       L 240 312
+       L 242 296
+       L 246 308
+       L 250 292
+       L 254 304
+       L 258 290
+       L 258 300
+       C 260 294, 264 282, 266 268
+       C 276 256, 280 236, 274 220
+       C 268 226, 262 230, 256 232
+       C 248 234, 232 234, 224 232
+       C 218 230, 212 226, 206 220 Z"
+    fill="url(#m-beard)"
+  />
+  <!-- Beard side-shading -->
+  <path
+    d="M 206 220
+       C 202 236, 206 256, 216 268
+       C 218 252, 220 238, 222 228
+       C 216 226, 210 224, 206 220 Z"
+    fill="#2e2820"
+    opacity="0.45"
+  />
+  <path
+    d="M 274 220
+       C 278 236, 274 256, 264 268
+       C 262 252, 260 238, 258 228
+       C 264 226, 270 224, 274 220 Z"
+    fill="#2e2820"
+    opacity="0.45"
+  />
 
   <!-- Hat -->
   <g>
@@ -161,90 +232,62 @@
          C 198 224, 168 224, 152 214 Z"
       fill="#1a2f18"
     />
-    <path d="M 168 210 C 200 204, 280 204, 312 210" stroke="#5d7a4a" stroke-width="1.2" fill="none" opacity="0.7" />
     <path d="M 168 218 C 200 222, 280 222, 312 218" stroke="#070d09" stroke-width="0.9" fill="none" opacity="0.5" />
 
     <!-- Bottom row — widest, overhanging the brim -->
-    <path d="M 174 200 C 162 192, 162 176, 180 178 C 188 188, 184 206, 174 200 Z" fill="#2a4422" />
-    <path d="M 192 200 C 184 188, 186 174, 198 178 C 204 188, 200 204, 192 200 Z" fill="#2a4422" />
-    <path d="M 214 196 C 206 184, 208 168, 222 174 C 226 184, 222 200, 214 196 Z" fill="#3d5b30" />
-    <path d="M 234 192 C 226 178, 230 162, 240 168 C 244 180, 242 196, 234 192 Z" fill="#4f6c3a" />
-    <path d="M 246 192 C 254 178, 250 162, 240 168 C 236 180, 238 196, 246 192 Z" fill="#3d5b30" />
-    <path d="M 266 196 C 274 184, 272 168, 258 174 C 254 184, 258 200, 266 196 Z" fill="#4f6c3a" />
-    <path d="M 288 200 C 296 188, 294 174, 282 178 C 276 188, 280 204, 288 200 Z" fill="#2a4422" />
-    <path d="M 306 200 C 318 192, 318 176, 300 178 C 292 188, 296 206, 306 200 Z" fill="#2a4422" />
-
-    <!-- Filler leaves between rows -->
-    <path d="M 200 184 C 190 172, 196 158, 208 166 C 210 178, 208 192, 200 184 Z" fill="#4f6c3a" />
-    <path d="M 280 184 C 290 172, 284 158, 272 166 C 270 178, 272 192, 280 184 Z" fill="#4f6c3a" />
-    <path d="M 224 188 C 218 174, 226 160, 234 168 C 234 178, 230 196, 224 188 Z" fill="#5d7a4a" />
-    <path d="M 256 188 C 262 174, 254 160, 246 168 C 246 178, 250 196, 256 188 Z" fill="#5d7a4a" />
+    <path transform="translate(-14 0)" d="M 174 200 C 162 192, 162 176, 180 178 C 188 188, 184 206, 174 200 Z" fill="#2a4422" />
+    <path transform="translate(-10 0)" d="M 192 200 C 184 188, 186 174, 198 178 C 204 188, 200 204, 192 200 Z" fill="#2a4422" />
+    <path transform="translate(-6 0)" d="M 214 196 C 206 184, 208 168, 222 174 C 226 184, 222 200, 214 196 Z" fill="#3d5b30" />
+    <path transform="translate(-3 0)" d="M 234 192 C 226 178, 230 162, 240 168 C 244 180, 242 196, 234 192 Z" fill="#4f6c3a" />
+    <path transform="translate(3 0)" d="M 246 192 C 254 178, 250 162, 240 168 C 236 180, 238 196, 246 192 Z" fill="#3d5b30" />
+    <path transform="translate(6 0)" d="M 266 196 C 274 184, 272 168, 258 174 C 254 184, 258 200, 266 196 Z" fill="#4f6c3a" />
+    <path transform="translate(10 0)" d="M 288 200 C 296 188, 294 174, 282 178 C 276 188, 280 204, 288 200 Z" fill="#2a4422" />
+    <path transform="translate(14 0)" d="M 306 200 C 318 192, 318 176, 300 178 C 292 188, 296 206, 306 200 Z" fill="#2a4422" />
 
     <!-- Mid row — narrower, follows the cone -->
-    <path d="M 206 174 C 198 162, 204 146, 214 152 C 216 164, 212 188, 206 174 Z" fill="#5d7a4a" />
-    <path d="M 218 178 C 210 164, 214 148, 226 154 C 230 166, 226 184, 218 178 Z" fill="#5d7a4a" />
+    <path transform="translate(-12 0)" d="M 206 174 C 198 162, 204 146, 214 152 C 216 164, 212 188, 206 174 Z" fill="#5d7a4a" />
+    <path transform="translate(-6 0)" d="M 218 178 C 210 164, 214 148, 226 154 C 230 166, 226 184, 218 178 Z" fill="#5d7a4a" />
     <path d="M 240 170 C 232 154, 248 144, 254 158 C 256 172, 248 184, 240 170 Z" fill="#7aa36a" />
-    <path d="M 262 178 C 270 164, 266 148, 254 154 C 250 166, 254 184, 262 178 Z" fill="#5d7a4a" />
-    <path d="M 274 174 C 282 162, 276 146, 266 152 C 264 164, 268 188, 274 174 Z" fill="#5d7a4a" />
+    <path transform="translate(6 0)" d="M 262 178 C 270 164, 266 148, 254 154 C 250 166, 254 184, 262 178 Z" fill="#5d7a4a" />
+    <path transform="translate(12 0)" d="M 274 174 C 282 162, 276 146, 266 152 C 264 164, 268 188, 274 174 Z" fill="#5d7a4a" />
 
     <!-- Upper row — small leaves near the apex -->
-    <path d="M 222 156 C 214 142, 226 130, 232 142 C 232 152, 228 166, 222 156 Z" fill="#5d7a4a" />
-    <path d="M 228 152 C 222 138, 234 128, 240 138 C 240 148, 234 160, 228 152 Z" fill="#7aa36a" />
-    <path d="M 252 152 C 258 138, 246 128, 240 138 C 240 148, 246 160, 252 152 Z" fill="#7aa36a" />
-    <path d="M 258 156 C 266 142, 254 130, 248 142 C 248 152, 252 166, 258 156 Z" fill="#5d7a4a" />
+    <path transform="translate(-10 0)" d="M 222 156 C 214 142, 226 130, 232 142 C 232 152, 228 166, 222 156 Z" fill="#5d7a4a" />
+    <path transform="translate(-4 0)" d="M 228 152 C 222 138, 234 128, 240 138 C 240 148, 234 160, 228 152 Z" fill="#7aa36a" />
+    <path transform="translate(4 0)" d="M 252 152 C 258 138, 246 128, 240 138 C 240 148, 246 160, 252 152 Z" fill="#7aa36a" />
+    <path transform="translate(10 0)" d="M 258 156 C 266 142, 254 130, 248 142 C 248 152, 252 166, 258 156 Z" fill="#5d7a4a" />
 
     <!-- Top cluster -->
-    <path d="M 234 132 C 228 120, 238 110, 242 122 C 240 130, 236 140, 234 132 Z" fill="#7aa36a" />
-    <path d="M 246 132 C 252 120, 242 110, 238 122 C 240 130, 244 140, 246 132 Z" fill="#7aa36a" />
+    <path transform="translate(-6 0)" d="M 234 132 C 228 120, 238 110, 242 122 C 240 130, 236 140, 234 132 Z" fill="#7aa36a" />
+    <path transform="translate(6 0)" d="M 246 132 C 252 120, 242 110, 238 122 C 240 130, 244 140, 246 132 Z" fill="#7aa36a" />
 
     <!-- Apex tip leaf -->
     <path d="M 240 116 C 234 106, 246 102, 246 114 C 244 122, 240 122, 240 116 Z" fill="#4f6c3a" />
 
-    <!-- Vein details on a few prominent leaves -->
-    <path d="M 240 168 Q 240 180, 240 192" stroke="#243d1d" stroke-width="0.7" fill="none" opacity="0.55" />
-    <path d="M 222 174 Q 220 184, 218 196" stroke="#162513" stroke-width="0.6" fill="none" opacity="0.5" />
-    <path d="M 258 174 Q 260 184, 262 196" stroke="#162513" stroke-width="0.6" fill="none" opacity="0.5" />
-
-    <!-- Berries scattered through the triangle -->
+    <!-- Berries — two on the dome -->
     <circle cx="232" cy="180" r="1.6" fill="#962a2a" opacity="0.85" />
     <circle cx="248" cy="180" r="1.6" fill="#962a2a" opacity="0.85" />
-    <circle cx="240" cy="158" r="1.4" fill="#c98f2a" opacity="0.85" />
-    <circle cx="240" cy="134" r="1.2" fill="#c98f2a" opacity="0.7" />
-
-    <!-- Leaves trailing along the hat dome outline -->
-    <g>
-      <!-- Left side, base to mid -->
-      <path d="M 168 210 C 156 214, 150 222, 158 226 C 168 226, 174 218, 168 210 Z" fill="#3d5b30" />
-      <path d="M 174 196 C 162 198, 158 208, 168 210 C 178 208, 180 200, 174 196 Z" fill="#4f6c3a" />
-      <path d="M 184 178 C 172 180, 170 192, 180 194 C 190 192, 192 184, 184 178 Z" fill="#5d7a4a" />
-      <path d="M 196 158 C 184 160, 184 172, 194 174 C 204 170, 204 162, 196 158 Z" fill="#3d5b30" />
-      <path d="M 208 138 C 196 138, 196 152, 206 154 C 216 152, 216 142, 208 138 Z" fill="#4f6c3a" />
-      <path d="M 220 118 C 210 118, 212 130, 220 132 C 228 130, 228 120, 220 118 Z" fill="#5d7a4a" />
-
-      <!-- Apex cluster -->
-      <path d="M 232 102 C 224 100, 224 110, 232 112 C 240 110, 240 102, 232 102 Z" fill="#7aa36a" />
-      <path d="M 248 102 C 256 100, 256 110, 248 112 C 240 110, 240 102, 248 102 Z" fill="#7aa36a" />
-
-      <!-- Right side, apex back down to base -->
-      <path d="M 260 118 C 270 118, 268 130, 260 132 C 252 130, 252 120, 260 118 Z" fill="#5d7a4a" />
-      <path d="M 272 138 C 284 138, 284 152, 274 154 C 264 152, 264 142, 272 138 Z" fill="#4f6c3a" />
-      <path d="M 284 158 C 296 160, 296 172, 286 174 C 276 170, 276 162, 284 158 Z" fill="#3d5b30" />
-      <path d="M 296 178 C 308 180, 310 192, 300 194 C 290 192, 288 184, 296 178 Z" fill="#5d7a4a" />
-      <path d="M 306 196 C 318 198, 322 208, 312 210 C 302 208, 300 200, 306 196 Z" fill="#4f6c3a" />
-      <path d="M 312 210 C 324 214, 330 222, 322 226 C 312 226, 306 218, 312 210 Z" fill="#3d5b30" />
-
-      <!-- Tiny berries along the rim -->
-      <circle cx="178" cy="206" r="1.4" fill="#962a2a" opacity="0.85" />
-      <circle cx="302" cy="206" r="1.4" fill="#962a2a" opacity="0.85" />
-      <circle cx="240" cy="108" r="1.2" fill="#c98f2a" opacity="0.85" />
-    </g>
   </g>
 
-  <!-- Smile — only feature visible under the brim -->
-  <path d="M 230 240 Q 240 246, 250 240" stroke="#2a1810" stroke-width="1.6" fill="none" stroke-linecap="round" />
+
+  <!-- Mustache — bushy, drooping past the corners of the mouth -->
+  <path
+    d="M 214 234
+       C 222 230, 232 232, 240 238
+       C 248 232, 258 230, 266 234
+       C 264 244, 254 248, 246 242
+       C 242 244, 238 244, 234 242
+       C 226 248, 216 244, 214 234 Z"
+    fill="url(#m-beard)"
+  />
+
+  <!-- Mouth — small, serious, peeking between mustache and beard -->
+  <path d="M 232 250 Q 240 253, 248 250" stroke="#2a1810" stroke-width="2" fill="none" stroke-linecap="round" />
 
   <!-- Staff -->
-  <g>
+  <g
+    style="transform: translateY({staffY}px); transition: transform 200ms cubic-bezier(0.22, 0.8, 0.2, 1);"
+  >
     <line x1="170" y1="84" x2="178" y2="700" stroke="url(#m-wood)" stroke-width="6.5" stroke-linecap="round" />
     <rect x="167" y="305" width="14" height="6" rx="1.5" fill="#3a2618" />
     <rect x="167" y="318" width="14" height="2" rx="1" fill="#3a2618" />
@@ -261,8 +304,8 @@
       <path d="M -5 16 L 0 -2 L 5 16 Z" fill="#a87a22" opacity="0.5" />
     </g>
 
-    <ellipse cx="175" cy="372" rx="12" ry="14" fill="#1a1208" />
-    <path d="M 168 366 Q 175 360, 184 364" stroke="#3a2618" stroke-width="1.2" fill="none" />
+    <ellipse cx="175" cy="372" rx="12" ry="14" fill="url(#m-skin)" />
+    <path d="M 168 366 Q 175 360, 184 364" stroke="#5a4128" stroke-width="1.2" fill="none" opacity="0.7" />
   </g>
 
   <!-- Pointing arm — pivot dropped to chest height (y=268) -->
@@ -276,8 +319,8 @@
          C 360 282, 320 286, 295 280 Z"
       fill="url(#m-cloak-arm)"
     />
-    <path d="M 305 264 C 340 266, 375 268, 392 270" stroke="#070d09" stroke-width="1" opacity="0.5" fill="none" />
-    <ellipse cx="395" cy="269" rx="11" ry="9" fill="#070d09" opacity="0.55" />
+    <path d="M 305 264 C 340 266, 375 268, 392 270" stroke="#152a1d" stroke-width="1" opacity="0.5" fill="none" />
+    <ellipse cx="395" cy="269" rx="11" ry="9" fill="#152a1d" opacity="0.55" />
 
     <g
       style="transform: rotate({forearmDeg}deg); transform-origin: 395px 269px; transform-box: view-box; transition: transform 200ms cubic-bezier(0.22, 0.8, 0.2, 1);"
@@ -289,11 +332,11 @@
            C 470 277, 420 277, 392 277 Z"
         fill="url(#m-cloak-arm)"
       />
-      <path d="M 400 270 C 440 271, 480 272, 500 272" stroke="#070d09" stroke-width="1" opacity="0.45" fill="none" />
-      <path d="M 498 264 C 512 266, 516 274, 508 278 L 498 278 Z" fill="#0b1610" />
+      <path d="M 400 270 C 440 271, 480 272, 500 272" stroke="#152a1d" stroke-width="1" opacity="0.45" fill="none" />
+      <path d="M 498 264 C 512 266, 516 274, 508 278 L 498 278 Z" fill="#1d3d2a" />
 
-      <ellipse cx="513" cy="271" rx="9" ry="6.5" fill="#c4b48b" />
-      <path d="M 508 267 Q 514 264, 520 267" stroke="#7a6a48" stroke-width="0.6" fill="none" opacity="0.6" />
+      <ellipse cx="513" cy="271" rx="9" ry="6.5" fill="url(#m-skin)" />
+      <path d="M 508 267 Q 514 264, 520 267" stroke="#5a4128" stroke-width="0.6" fill="none" opacity="0.6" />
 
       <g transform="translate(519 271)">
         <path d="M 0 0 C 30 -3, 60 -6, 92 -10" stroke="#5a3d2b" stroke-width="2.8" fill="none" stroke-linecap="round" />

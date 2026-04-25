@@ -35,20 +35,23 @@
   <Mascot
     track
     class="hidden lg:block pointer-events-none select-none absolute"
-    style="bottom: 0; left: clamp(0rem, 6vw, 9rem); height: 84%; aspect-ratio: 480 / 800; z-index: 5;"
+    style="bottom: 0; left: clamp(3rem, 12vw, 16rem); height: 84%; aspect-ratio: 480 / 800; z-index: 5;"
   />
 
   <!-- Editorial aside -->
   <aside class="hidden lg:flex flex-col gap-8 p-10 relative z-[20] text-earth">
-    <div class="flex items-center gap-3">
+    <div class="flex items-center gap-5">
       <span
-        class="w-10 h-10 grid place-items-center rounded-btn text-leaf border"
+        class="w-20 h-20 grid place-items-center rounded-box text-leaf border"
         style="background: color-mix(in srgb, var(--color-leaf) 22%, transparent); border-color: color-mix(in srgb, var(--color-leaf) 35%, transparent);"
         aria-hidden="true"
       >
-        <Tree size="1.5em" weight="fill" />
+        <Tree size="3em" weight="fill" />
       </span>
-      <span class="font-serif font-semibold text-lg tracking-tight">Waldmeister</span>
+      <span
+        class="font-serif font-semibold text-[clamp(2.75rem,4.5vw,4rem)] leading-none tracking-[0.04em] uppercase"
+        style="font-variation-settings: 'opsz' 144, 'SOFT' 40, 'WONK' 1;"
+      >WALDMEISTER</span>
     </div>
 
     <div class="mt-auto flex flex-col gap-3">
@@ -112,10 +115,10 @@
       <div class="text-center flex flex-col gap-1 mt-3">
         <span class="eyebrow">Anmeldung</span>
         <h1
-          class="font-serif font-normal text-[1.75rem] leading-tight tracking-tight text-ink m-0"
+          class="font-serif font-semibold text-[2.25rem] leading-none tracking-[0.04em] uppercase text-ink m-0"
           style="font-variation-settings: 'opsz' 144, 'SOFT' 40, 'WONK' 1;"
         >
-          Willkommen zurück.
+          WALDMEISTER
         </h1>
         <p class="text-content-muted text-sm">Melde dich an, um deine Wälder zu verwalten.</p>
       </div>

@@ -225,6 +225,12 @@ body {
   background: var(--color-background);
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
+  /* Kill Android Chrome pull-to-refresh and iOS rubber-band overscroll.
+     Without this, dragging top→bottom on the map (or anywhere near the
+     top of the document) is captured by the browser as a refresh gesture
+     before MapLibre/our drawing handlers ever see it. `touch-action: none`
+     on .map-surface is not enough — overscroll is a separate gesture. */
+  overscroll-behavior: none;
 }
 
 /* A parchment-over-moss ambient wash — very quiet, adds atmosphere. */
@@ -481,10 +487,15 @@ select {
    hard-code hex values outside @theme / :root.
    ========================================================================= */
 
-/* Map fills its container everywhere it's used. */
+/* Map fills its container everywhere it's used.
+   `touch-action: none` keeps mobile browsers from claiming two-finger
+   gestures as page-level pinch-zoom on scrollable pages — without it
+   pan works (MapLibre owns single-finger touches) but pinch silently
+   breaks. MapLibre's own handlers still re-deliver the gestures. */
 .map-surface {
   height: 100%;
   width: 100%;
+  touch-action: none;
 }
 
 /* Tree marker dots (colored by health, labeled by icon). */
@@ -532,6 +543,12 @@ select {
   height: 67dvh;
   flex: 0 0 auto;
   overflow: hidden;
+}
+.home-shell--empty {
+  min-height: 0;
+}
+.home-shell--empty .home-map {
+  height: calc(100dvh - 61px);
 }
 .home-scroll {
   flex: 1 0 auto;

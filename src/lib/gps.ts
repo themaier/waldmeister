@@ -50,17 +50,11 @@ export async function getBetterGpsFix(opts: GetBetterGpsFixOptions = {}): Promis
   if (!window.isSecureContext) return null;
   if (!('geolocation' in navigator)) return null;
 
-  // If supported, preflight permissions so we can fail fast (and avoid
-  // repeated prompts / noisy errors) when already denied.
-  try {
-    const perms = (navigator as Navigator & { permissions?: Permissions }).permissions;
-    if (perms?.query) {
-      const st = await perms.query({ name: 'geolocation' as PermissionName });
-      if (st.state === 'denied') return null;
-    }
-  } catch {
-    // Ignore: permissions API not available / blocked.
-  }
+  // NOTE: do NOT `await navigator.permissions.query(...)` here. On iOS Safari
+  // the geolocation prompt only appears when getCurrentPosition/watchPosition
+  // is called synchronously inside a user-gesture handler; an `await` before
+  // the call drops that activation and Safari silently auto-denies. The
+  // PERMISSION_DENIED error path below covers the already-denied case.
 
   const minWaitMs = opts.minWaitMs ?? 3000;
   const maxWaitMs = opts.maxWaitMs ?? 3500;
