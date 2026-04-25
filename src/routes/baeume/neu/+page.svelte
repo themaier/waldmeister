@@ -111,12 +111,18 @@
   async function submit() {
     error = null;
     if (latitude === null || longitude === null) {
-      error = 'Koordinaten fehlen.';
-      return;
+      await retakeGps(); // triggers permission prompt if needed
+      if (latitude === null || longitude === null) {
+        error = 'Koordinaten fehlen.';
+        return;
+      }
     }
     if (images.length === 0) {
-      error = 'Bitte mindestens ein Foto hinzufügen.';
-      return;
+      cameraInputEl?.click(); // triggers camera/picker prompt
+      if (images.length === 0) {
+        error = 'Bitte mindestens ein Foto hinzufügen.';
+        return;
+      }
     }
     submitting = true;
     try {
