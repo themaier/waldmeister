@@ -2,10 +2,11 @@
   // Anfahrt / Rückegasse freehand drawing tool — README §5.4.
   //
   // Lifecycle:
-  //   1. drawing  — finger/mouse drags build the path; pan/zoom locked.
-  //   2. review   — finger lifted, "Übernehmen" / "Wiederholen" floating bar.
-  //   3. form     — bottom-sheet asks for Typ / Name / Gerät / Kommentar.
-  //   4. saving   — submitting to the server; sheet stays open.
+  //   1. drawing  — freehand strokes; each lift commits a segment; you can
+  //                 add more without a separate "continue" step, or
+  //                 "Wiederholen" / "Übernehmen" from the bottom bar.
+  //   2. form     — bottom-sheet asks for Typ / Name / Gerät / Kommentar.
+  //   3. saving   — submitting to the server; sheet stays open.
   //
   // The component manages a temporary `route-draft` GeoJSON layer on the
   // shared MapLibre instance so the line is visible *under* this overlay.
@@ -31,13 +32,15 @@
       vehicleType: VehicleType;
       name: string | null;
       comment: string | null;
-      pathData: { type: 'LineString'; coordinates: [number, number][] };
+      pathData:
+        | { type: 'LineString'; coordinates: [number, number][] }
+        | { type: 'MultiLineString'; coordinates: [number, number][][] };
     }) => Promise<void>;
   }
 
   let { mlMap, initialType, onCancel, onSave }: Props = $props();
 
-  type Phase = 'drawing' | 'review' | 'form' | 'saving';
+  type Phase = 'drawing' | 'form' | 'saving';
   let phase = $state<Phase>('drawing');
   // Local form fields seeded from the prop once, then edited locally — see
   // CLAUDE.md ("Default to `$derived` … unless …form fields with `bind:value`").
@@ -46,7 +49,9 @@
   let vehicleType = $state<VehicleType>('kleingerät');
   let name = $state('');
   let comment = $state('');
+  // Current stroke; committed strokes live in `lines` (see pointerUp).
   let path = $state<[number, number][]>([]);
+  let lines = $state<[number, number][][]>([]);
   let saveError = $state<string | null>(null);
 
   // README §4.3 — Rückegasse → vehicleType locked to kleingerät.
@@ -77,23 +82,28 @@
     });
   }
 
+  function lineFeatures(coords: [number, number][]) {
+    if (coords.length < 2) return [];
+    return [
+      {
+        type: 'Feature' as const,
+        properties: {},
+        geometry: { type: 'LineString' as const, coordinates: coords }
+      }
+    ];
+  }
+
   function updatePreview() {
     const src = mlMap.getSource(SOURCE_ID) as maplibregl.GeoJSONSource | undefined;
     if (!src) return;
-    if (path.length < 2) {
+    const fromCommitted = lines.flatMap((c) => lineFeatures(c));
+    const current = lineFeatures(path);
+    const features = [...fromCommitted, ...current];
+    if (features.length === 0) {
       src.setData({ type: 'FeatureCollection', features: [] });
       return;
     }
-    src.setData({
-      type: 'FeatureCollection',
-      features: [
-        {
-          type: 'Feature',
-          properties: {},
-          geometry: { type: 'LineString', coordinates: path }
-        }
-      ]
-    });
+    src.setData({ type: 'FeatureCollection', features });
   }
 
   function clearPreview() {
@@ -158,7 +168,9 @@
       updatePreview();
       return;
     }
-    phase = 'review';
+    lines = [...lines, path];
+    path = [];
+    updatePreview();
   }
 
   $effect(() => {
@@ -175,6 +187,15 @@
     ];
     for (const h of handlers) h.disable();
 
+    // On touch devices the canvas container ships with `touch-action: pan-x
+    // pan-y` (so the browser can pan/zoom the map). That same setting makes
+    // the browser claim our finger gesture for scrolling, firing
+    // `pointercancel` after the very first event — which is why drawing
+    // "only places a dot" in mobile emulation. Disable browser-handled
+    // gestures while the tool is mounted; restore on teardown.
+    const prevTouchAction = canvas.style.touchAction;
+    canvas.style.touchAction = 'none';
+
     canvas.addEventListener('pointerdown', onPointerDown);
     canvas.addEventListener('pointermove', onPointerMove);
     canvas.addEventListener('pointerup', onPointerUp);
@@ -185,6 +206,7 @@
       canvas?.removeEventListener('pointermove', onPointerMove);
       canvas?.removeEventListener('pointerup', onPointerUp);
       canvas?.removeEventListener('pointercancel', onPointerUp);
+      if (canvas) canvas.style.touchAction = prevTouchAction;
       for (const h of handlers) h.enable();
       clearPreview();
     };
@@ -192,13 +214,25 @@
 
   function redo() {
     path = [];
+    lines = [];
     updatePreview();
     phase = 'drawing';
   }
 
   function accept() {
+    if (lines.length === 0) return;
     saveError = null;
     phase = 'form';
+  }
+
+  function pathDataFromLines() {
+    if (lines.length === 0) {
+      throw new Error('Kein Weg gezeichnet.');
+    }
+    if (lines.length === 1) {
+      return { type: 'LineString' as const, coordinates: lines[0] };
+    }
+    return { type: 'MultiLineString' as const, coordinates: lines };
   }
 
   async function submit() {
@@ -210,7 +244,7 @@
         vehicleType,
         name: name.trim() || null,
         comment: comment.trim() || null,
-        pathData: { type: 'LineString', coordinates: path }
+        pathData: pathDataFromLines()
       });
     } catch (e) {
       saveError = e instanceof Error ? e.message : 'Speichern fehlgeschlagen.';
@@ -226,7 +260,9 @@
     style="top: calc(0.75rem + env(safe-area-inset-top)); background: var(--color-pine-deep);"
   >
     <span class="w-2 h-2 rounded-full bg-ember animate-breathe"></span>
-    <span>{ROUTE_TYPE_LABELS[routeType]} mit dem Finger zeichnen</span>
+    <span
+      >{ROUTE_TYPE_LABELS[routeType]} — Strich {lines.length + 1} mit dem Finger zeichnen</span
+    >
     <button
       class="w-7 h-7 min-h-0 grid place-items-center rounded-full text-earth border-0"
       style="background: color-mix(in srgb, var(--color-earth) 14%, transparent);"
@@ -236,25 +272,24 @@
       <X size="0.9em" weight="bold" />
     </button>
   </div>
-{/if}
-
-{#if phase === 'review'}
   <div
     class="absolute left-1/2 -translate-x-1/2 z-30 inline-flex items-center gap-2 px-2 py-2 rounded-pill bg-surface border shadow-canopy animate-rise pointer-events-auto"
     style="bottom: calc(1.5rem + env(safe-area-inset-bottom));"
     role="status"
   >
     <button
-      class="inline-flex items-center gap-2 px-4 py-2 min-h-[42px] rounded-pill text-ink border-0 bg-transparent font-semibold text-sm hover:bg-surface-muted"
+      class="inline-flex items-center gap-2 px-3 py-2 min-h-[42px] rounded-pill text-ink border-0 bg-transparent font-semibold text-sm hover:bg-surface-muted"
       onclick={redo}
     >
       <ArrowCounterClockwise size="1em" weight="bold" />
       Wiederholen
     </button>
     <button
-      class="inline-flex items-center gap-2 px-4 py-2 min-h-[42px] rounded-pill text-earth border-0 font-semibold text-sm shadow-understory"
+      class="inline-flex items-center gap-2 px-4 py-2 min-h-[42px] rounded-pill text-earth border-0 font-semibold text-sm shadow-understory disabled:opacity-50 disabled:pointer-events-none"
       style="background: var(--color-pine);"
       onclick={accept}
+      type="button"
+      disabled={lines.length === 0}
     >
       <Check size="1em" weight="bold" />
       Übernehmen

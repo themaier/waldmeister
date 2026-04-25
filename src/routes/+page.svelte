@@ -8,22 +8,31 @@
   import PlotSwitcher from "$lib/components/PlotSwitcher.svelte";
   import OnboardingCard from "$lib/components/OnboardingCard.svelte";
   import RouteDrawTool from "$lib/components/RouteDrawTool.svelte";
+  import AreaDrawTool from "$lib/components/AreaDrawTool.svelte";
   import { boundsOfPolygons, shouldFlyTo } from "$lib/geo";
   import {
-    Plus,
+    Camera,
     Crosshair,
     X,
     Gear,
     Tree,
     Calculator,
     Path,
+    Polygon as PolygonIcon,
   } from "phosphor-svelte";
   import type { PageData } from "./$types";
   import maplibregl from "maplibre-gl";
   import { getPlotOverview } from "./trees.remote";
   import { officialTreeDotsForPlot } from "./plots.remote";
   import { createRoute } from "./access-routes.remote";
-  import type { RouteType } from "$lib/enums";
+  import { createArea, deleteArea } from "./areas.remote";
+  import {
+    HEALTH_LABELS,
+    ROUTE_TYPE_LABELS,
+    TREE_TYPE_LABELS,
+    VEHICLE_TYPE_LABELS,
+    type RouteType,
+  } from "$lib/enums";
 
   let { data }: { data: PageData & { plots: any[]; parcels: any[] } } =
     $props();
@@ -46,6 +55,22 @@
   let routeDrawType = $state<RouteType | null>(null);
   let treesForActive = $state<any[]>([]);
   let routesForActive = $state<any[]>([]);
+  let areasForActive = $state<
+    {
+      id: string;
+      comment: string | null;
+      appliedTreeStatus: string | null;
+      geometry: { type: "Polygon"; coordinates: [number, number][][] };
+    }[]
+  >([]);
+  // Bereich drawing + selection. While `areaDrawActive` is true the
+  // AreaDrawTool owns the canvas. After commit, the most recently drawn
+  // polygon's interior trees become the current "selection" so the user can
+  // see at a glance which trees a freshly painted Bereich covers.
+  let areaDrawActive = $state(false);
+  let areaActionError = $state<string | null>(null);
+  let selectedAreaId = $state<string | null>(null);
+  let selectedTreeIds = $state<Record<string, true>>({});
   // Official Bayern Einzelbäume points are loaded on demand for the active
   // plot only (never the whole region). `officialTreeDots` is the cache for
   // the *currently active* plot — it gets cleared whenever the plot changes.
@@ -58,6 +83,9 @@
   let lastBounds = $state<[[number, number], [number, number]] | null>(null);
 
   const activePlot = $derived(data.plots.find((p) => p.id === activePlotId));
+  const activeParcels = $derived(
+    data.parcels.filter((p) => p.plotId === activePlotId)
+  );
   // Record (plain object) rather than Set: Svelte's $state proxy doesn't wrap
   // Map/Set, so we keep owned-plot membership in a shape that's safe to share
   // with any $state consumer too.
@@ -149,6 +177,52 @@
       },
     });
 
+    // Areas (Bereich) — saved freehand polygons. Drawn before the trees
+    // layer so tree dots sit visibly on top of the area fill.
+    map.addSource("areas", {
+      type: "geojson",
+      data: { type: "FeatureCollection", features: [] },
+    });
+    map.addLayer({
+      id: "areas-fill",
+      type: "fill",
+      source: "areas",
+      paint: {
+        "fill-color": [
+          "case",
+          ["==", ["get", "isSelected"], true],
+          "#d4a23c",
+          "#c98f2a",
+        ],
+        "fill-opacity": [
+          "case",
+          ["==", ["get", "isSelected"], true],
+          0.28,
+          0.14,
+        ],
+      },
+    });
+    map.addLayer({
+      id: "areas-stroke",
+      type: "line",
+      source: "areas",
+      paint: {
+        "line-color": [
+          "case",
+          ["==", ["get", "isSelected"], true],
+          "#b65a1f",
+          "#c98f2a",
+        ],
+        "line-width": [
+          "case",
+          ["==", ["get", "isSelected"], true],
+          2.5,
+          1.5,
+        ],
+        "line-opacity": 0.95,
+      },
+    });
+
     // Trees layer
     map.addSource("trees", {
       type: "geojson",
@@ -173,8 +247,18 @@
           "#4a4a4a",
           "#5d7a4a",
         ],
-        "circle-stroke-color": "#f5f1e6",
-        "circle-stroke-width": 2,
+        "circle-stroke-color": [
+          "case",
+          ["==", ["get", "isSelected"], true],
+          "#b65a1f",
+          "#f5f1e6",
+        ],
+        "circle-stroke-width": [
+          "case",
+          ["==", ["get", "isSelected"], true],
+          3.5,
+          2,
+        ],
       },
     });
 
@@ -298,25 +382,47 @@
     return officialTreeDots.length;
   }
 
-  async function loadActivePlotLayers(plotId: string | null) {
-    if (!plotId) {
-      treesForActive = [];
-      routesForActive = [];
-    } else {
-      try {
-        const body = await getPlotOverview(plotId).run();
-        treesForActive = body.trees;
-        routesForActive = body.routes;
-      } catch {
-        /* non-fatal: leave layers empty on error */
-      }
+  // Ray-casting point-in-polygon — handy for highlighting the trees that
+  // sit inside a freshly drawn Bereich without round-tripping the server.
+  function pointInRing(
+    pt: [number, number],
+    ring: [number, number][]
+  ): boolean {
+    let inside = false;
+    const [x, y] = pt;
+    for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+      const [xi, yi] = ring[i];
+      const [xj, yj] = ring[j];
+      const intersects =
+        yi > y !== yj > y &&
+        x < ((xj - xi) * (y - yi)) / (yj - yi + 0.0) + xi;
+      if (intersects) inside = !inside;
     }
-    // Reset official-tree state on every plot switch — the cached dots
-    // belong to the *previous* plot and must not leak across.
-    officialTreeDots = [];
-    officialTreesVisible = false;
-    treeCountResult = null;
-    treeActionError = null;
+    return inside;
+  }
+  function pointInPolygon(
+    pt: [number, number],
+    poly: { coordinates: [number, number][][] }
+  ): boolean {
+    if (poly.coordinates.length === 0) return false;
+    if (!pointInRing(pt, poly.coordinates[0])) return false;
+    for (let i = 1; i < poly.coordinates.length; i++) {
+      if (pointInRing(pt, poly.coordinates[i])) return false;
+    }
+    return true;
+  }
+  function treesInsideArea(area: {
+    geometry: { coordinates: [number, number][][] };
+  }): string[] {
+    const ids: string[] = [];
+    for (const t of treesForActive) {
+      const pt: [number, number] = [Number(t.longitude), Number(t.latitude)];
+      if (pointInPolygon(pt, area.geometry)) ids.push(t.id);
+    }
+    return ids;
+  }
+
+  function pushTreeFeatures() {
     if (!mlMap || !layersInitialized) return;
     (mlMap.getSource("trees") as maplibregl.GeoJSONSource | undefined)?.setData(
       {
@@ -332,10 +438,58 @@
             treeId: t.id,
             healthStatus: t.healthStatus,
             labels: t.labels,
+            isSelected: !!selectedTreeIds[t.id],
           },
         })),
       }
     );
+  }
+
+  function pushAreaFeatures() {
+    if (!mlMap || !layersInitialized) return;
+    (mlMap.getSource("areas") as maplibregl.GeoJSONSource | undefined)?.setData(
+      {
+        type: "FeatureCollection",
+        features: areasForActive.map((a) => ({
+          type: "Feature",
+          id: a.id,
+          geometry: a.geometry,
+          properties: {
+            areaId: a.id,
+            isSelected: a.id === selectedAreaId,
+          },
+        })),
+      }
+    );
+  }
+
+  async function loadActivePlotLayers(plotId: string | null) {
+    if (!plotId) {
+      treesForActive = [];
+      routesForActive = [];
+      areasForActive = [];
+    } else {
+      try {
+        const body = await getPlotOverview(plotId).run();
+        treesForActive = body.trees;
+        routesForActive = body.routes;
+        areasForActive = (body.areas ?? []) as typeof areasForActive;
+      } catch {
+        /* non-fatal: leave layers empty on error */
+      }
+    }
+    // Reset official-tree state on every plot switch — the cached dots
+    // belong to the *previous* plot and must not leak across.
+    officialTreeDots = [];
+    officialTreesVisible = false;
+    treeCountResult = null;
+    treeActionError = null;
+    selectedAreaId = null;
+    selectedTreeIds = {};
+    areaActionError = null;
+    if (!mlMap || !layersInitialized) return;
+    pushTreeFeatures();
+    pushAreaFeatures();
     (
       mlMap.getSource("routes") as maplibregl.GeoJSONSource | undefined
     )?.setData({
@@ -352,6 +506,76 @@
       })),
     });
     updateOfficialTreeFeatures();
+  }
+
+  function selectArea(areaId: string | null) {
+    selectedAreaId = areaId;
+    if (!areaId) {
+      selectedTreeIds = {};
+    } else {
+      const area = areasForActive.find((a) => a.id === areaId);
+      if (!area) {
+        selectedTreeIds = {};
+      } else {
+        const ids = treesInsideArea(area);
+        const next: Record<string, true> = {};
+        for (const id of ids) next[id] = true;
+        selectedTreeIds = next;
+      }
+    }
+    pushTreeFeatures();
+    pushAreaFeatures();
+  }
+
+  function clearSelection() {
+    selectArea(null);
+  }
+
+  function startAreaDraw() {
+    placementMode = false;
+    routeDrawType = null;
+    routeTypePickerOpen = false;
+    areaActionError = null;
+    areaDrawActive = true;
+  }
+  function cancelAreaDraw() {
+    areaDrawActive = false;
+  }
+  async function completeAreaDraw(polygon: {
+    type: "Polygon";
+    coordinates: [number, number][][];
+  }) {
+    if (!activePlotId) {
+      areaDrawActive = false;
+      return;
+    }
+    try {
+      const { areaId } = await createArea({
+        plotId: activePlotId,
+        geometry: polygon,
+      });
+      // Refresh the overview so the new area is part of the regular list,
+      // then mark it as the current selection.
+      await loadActivePlotLayers(activePlotId);
+      selectArea(areaId);
+    } catch (e) {
+      areaActionError =
+        e instanceof Error ? e.message : "Bereich konnte nicht gespeichert werden.";
+    } finally {
+      areaDrawActive = false;
+    }
+  }
+
+  async function removeArea(areaId: string) {
+    if (!activePlotId) return;
+    try {
+      await deleteArea(areaId);
+      if (selectedAreaId === areaId) clearSelection();
+      await loadActivePlotLayers(activePlotId);
+    } catch (e) {
+      areaActionError =
+        e instanceof Error ? e.message : "Bereich konnte nicht gelöscht werden.";
+    }
   }
 
   async function toggleOfficialTrees() {
@@ -442,8 +666,8 @@
     lat: number;
     originalEvent: MouseEvent;
   }) {
-    // Route drawing owns the canvas — let the tool handle taps itself.
-    if (routeDrawType) return;
+    // Route/area drawing owns the canvas — let the tool handle taps itself.
+    if (routeDrawType || areaDrawActive) return;
     if (placementMode) {
       placementMode = false;
       goto(`/baeume/neu?plot=${activePlotId}&lat=${e.lat}&lng=${e.lng}`);
@@ -481,7 +705,7 @@
 
   function onLongPress(e: { lng: number; lat: number }) {
     if (!activePlotId) return;
-    if (routeDrawType) return; // tool owns gestures
+    if (routeDrawType || areaDrawActive) return; // tool owns gestures
     goto(`/baeume/neu?plot=${activePlotId}&lat=${e.lat}&lng=${e.lng}`);
   }
 
@@ -495,6 +719,7 @@
   function startRouteDraw(type: RouteType) {
     routeTypePickerOpen = false;
     placementMode = false;
+    areaDrawActive = false;
     routeDrawType = type;
   }
   function cancelRouteDraw() {
@@ -505,7 +730,9 @@
     vehicleType: "kleingerät" | "großgerät";
     name: string | null;
     comment: string | null;
-    pathData: { type: "LineString"; coordinates: [number, number][] };
+    pathData:
+      | { type: "LineString"; coordinates: [number, number][] }
+      | { type: "MultiLineString"; coordinates: [number, number][][] };
   }) {
     if (!activePlotId) throw new Error("Kein Waldstück aktiv.");
     await createRoute({ plotId: activePlotId, ...input });
@@ -563,11 +790,11 @@
     activeId={activePlotId}
     onSwitch={switchTo}
     onCreate={createPlot}
-    toolActive={placementMode || routeDrawType !== null}
+    toolActive={placementMode || routeDrawType !== null || areaDrawActive}
     userName={data.user?.name ?? ""}
   />
 
-  <div class="relative overflow-hidden">
+  <div class="home-map">
     <Map
       bind:this={mapRef}
       onClick={onMapClick}
@@ -585,13 +812,13 @@
       </div>
     {/if}
 
-    <!-- Active-plot controls (bottom-right floating action stack).
-         While the route-drawing tool is active, the stack is hidden — the
-         tool owns the screen until the user accepts/cancels. -->
-    {#if activePlot && !routeDrawType}
+    <!-- Single primary action overlaid on the map: take a photo / add a tree
+         at the current GPS position. All other controls live in the
+         scrollable section below so the start screen stays uncluttered. -->
+    {#if activePlot && !routeDrawType && !areaDrawActive}
       <div
         class="absolute right-4 z-10 flex flex-col items-end gap-2"
-        style="bottom: calc(1.5rem + env(safe-area-inset-bottom));"
+        style="bottom: calc(1.25rem + env(safe-area-inset-bottom));"
       >
         {#if placementMode}
           <button
@@ -603,99 +830,14 @@
             <span>Platzierung abbrechen</span>
           </button>
         {:else}
-          <a
-            class="inline-flex items-center gap-2 px-4 py-3 min-h-[46px] rounded-pill text-ink border bg-surface/90 backdrop-blur font-semibold text-sm shadow-understory transition hover:-translate-y-px hover:shadow-canopy active:translate-y-0 no-underline"
-            href="/waldstuecke/{activePlot.id}"
-          >
-            <Gear size="1.125em" />
-            <span>Verwalten</span>
-          </a>
-          {#if treeActionError}
-            <div
-              class="max-w-[18rem] rounded-btn bg-surface/95 border px-3 py-2 text-xs text-crimson shadow-understory"
-            >
-              {treeActionError}
-            </div>
-          {/if}
-          {#if treeCountResult != null}
-            <div
-              class="max-w-[18rem] rounded-btn bg-surface/95 border px-3 py-2 text-xs text-content shadow-understory"
-            >
-              Offiziell gezählt: <strong>{treeCountResult}</strong> Bäume
-            </div>
-          {/if}
           <button
-            class="inline-flex items-center gap-2 px-4 py-3 min-h-[46px] rounded-pill text-ink border bg-surface/90 backdrop-blur font-semibold text-sm shadow-understory transition hover:-translate-y-px hover:shadow-canopy active:translate-y-0"
-            aria-pressed={officialTreesVisible}
-            onclick={toggleOfficialTrees}
-          >
-            <Tree size="1.125em" />
-            <span>
-              {officialTreesLoading ? "Lade Baum-Punkte…"
-              : officialTreesVisible ? "Baum-Punkte ausblenden"
-              : "Baum-Punkte anzeigen"}
-            </span>
-          </button>
-          <button
-            class="inline-flex items-center gap-2 px-4 py-3 min-h-[46px] rounded-pill text-ink border bg-surface/90 backdrop-blur font-semibold text-sm shadow-understory transition hover:-translate-y-px hover:shadow-canopy active:translate-y-0"
-            onclick={countOfficialTrees}
-          >
-            <Calculator size="1.125em" />
-            <span>{treeCountLoading ? "Zähle Bäume…" : "Bäume zählen"}</span>
-          </button>
-          <button
-            class="inline-flex items-center gap-2 px-4 py-3 min-h-[46px] rounded-pill text-ink border bg-surface/90 backdrop-blur font-semibold text-sm shadow-understory transition hover:-translate-y-px hover:shadow-canopy active:translate-y-0"
-            onclick={startPlacement}
-          >
-            <Crosshair size="1.125em" />
-            <span>Baum platzieren</span>
-          </button>
-
-          <!-- "Weg zeichnen" — segmented picker per §5.4: tap to reveal the
-               Anfahrt / Rückegasse choice, tap a choice to enter drawing mode. -->
-          {#if routeTypePickerOpen}
-            <div
-              class="flex flex-col items-end gap-2 animate-rise"
-              role="group"
-              aria-label="Wegtyp wählen"
-            >
-              <button
-                class="inline-flex items-center gap-2 px-4 py-2.5 min-h-[42px] rounded-pill text-ink border bg-surface/95 backdrop-blur font-semibold text-sm shadow-understory hover:-translate-y-px hover:shadow-canopy"
-                onclick={() => startRouteDraw("anfahrt")}
-              >
-                <span
-                  class="inline-block w-7 h-[3px] rounded-full"
-                  style="background: var(--color-pine-deep);"
-                ></span>
-                Anfahrt
-              </button>
-              <button
-                class="inline-flex items-center gap-2 px-4 py-2.5 min-h-[42px] rounded-pill text-ink border bg-surface/95 backdrop-blur font-semibold text-sm shadow-understory hover:-translate-y-px hover:shadow-canopy"
-                onclick={() => startRouteDraw("rueckegasse")}
-              >
-                <span
-                  class="inline-block w-7 h-[3px] rounded-full"
-                  style="background: repeating-linear-gradient(90deg, var(--color-pine-deep) 0 4px, transparent 4px 8px);"
-                ></span>
-                Rückegasse
-              </button>
-            </div>
-          {/if}
-          <button
-            class="inline-flex items-center gap-2 px-4 py-3 min-h-[46px] rounded-pill text-ink border bg-surface/90 backdrop-blur font-semibold text-sm shadow-understory transition hover:-translate-y-px hover:shadow-canopy active:translate-y-0"
-            aria-expanded={routeTypePickerOpen}
-            onclick={() => (routeTypePickerOpen = !routeTypePickerOpen)}
-          >
-            <Path size="1.125em" />
-            <span>Weg zeichnen</span>
-          </button>
-          <button
-            class="inline-flex items-center gap-2 px-5 py-3 min-h-[52px] rounded-pill text-earth border font-semibold text-sm shadow-canopy transition hover:-translate-y-px active:translate-y-0"
+            class="grid place-items-center w-14 h-14 rounded-full text-earth border shadow-canopy transition hover:-translate-y-px active:translate-y-0"
             style="background: linear-gradient(180deg, var(--color-pine), var(--color-pine-deep)); border-color: var(--color-pine-deep); box-shadow: var(--shadow-canopy), inset 0 1px 0 rgba(255,255,255,0.08);"
             onclick={addTreeAtCurrentGps}
+            aria-label="Baum hier fotografieren"
+            title="Baum hier fotografieren"
           >
-            <Plus size="1.25em" weight="bold" />
-            <span>Baum hier hinzufügen</span>
+            <Camera size="1.5em" weight="fill" />
           </button>
         {/if}
       </div>
@@ -732,6 +874,15 @@
       />
     {/if}
 
+    <!-- Bereich drawing tool — auto-closes the polygon on finger-up. -->
+    {#if areaDrawActive && mlMap && activePlotId}
+      <AreaDrawTool
+        {mlMap}
+        onCancel={cancelAreaDraw}
+        onComplete={completeAreaDraw}
+      />
+    {/if}
+
     <!-- Switch toast while a tool is active -->
     {#if tapToast}
       <div
@@ -763,4 +914,348 @@
       </div>
     {/if}
   </div>
+
+  <!-- Scrollable section beneath the map: three grouped cards — the
+       Waldstück itself (parcels, infrastructure, manage), the Bäume on it,
+       and the Bereich tool/list. Hidden while a tool is active so the
+       user's focus stays on the map. -->
+  {#if activePlot && !routeDrawType && !placementMode && !areaDrawActive}
+    <section class="home-scroll">
+      <!-- ===== Waldstück ===== -->
+      <article
+        class="flex flex-col gap-3 p-4 rounded-2xl bg-surface border shadow-understory"
+      >
+        <header class="flex items-start gap-3">
+          <div class="flex-1 min-w-0 flex flex-col gap-[2px]">
+            <span class="eyebrow">Waldstück</span>
+            <h2
+              class="font-serif font-medium text-[1.375rem] leading-tight tracking-tight text-ink m-0 truncate"
+              style="font-variation-settings: 'opsz' 96, 'SOFT' 40, 'WONK' 1;"
+              title={activePlot.name ?? "Ohne Name"}
+            >
+              {activePlot.name ?? "Ohne Name"}
+            </h2>
+            <p class="text-xs text-content-muted">
+              {activeParcels.length}
+              {activeParcels.length === 1 ? "Flurstück" : "Flurstücke"} ·
+              {routesForActive.length}
+              {routesForActive.length === 1 ? "Weg" : "Wege"} ·
+              {areasForActive.length}
+              {areasForActive.length === 1 ? "Bereich" : "Bereiche"}
+            </p>
+          </div>
+          <a
+            class="inline-flex items-center gap-1.5 px-3 py-2 min-h-[38px] rounded-pill text-ink border bg-surface font-semibold text-xs shadow-understory hover:-translate-y-px hover:shadow-canopy no-underline"
+            href="/waldstuecke/{activePlot.id}"
+          >
+            <Gear size="1em" />
+            Verwalten
+          </a>
+        </header>
+
+        <div class="flex flex-col gap-1.5">
+          <span class="eyebrow">Flurstücke</span>
+          <p class="text-sm text-content m-0">
+            {#if activeParcels.length === 0}
+              Keine Flurstücke zugeordnet.
+            {:else}
+              {activeParcels.map((p) => p.cadastralId).join(", ")}
+            {/if}
+          </p>
+        </div>
+
+        <div class="flex flex-col gap-2">
+          <div class="flex items-center justify-between gap-2">
+            <h3
+              class="text-xs font-semibold uppercase tracking-wider text-content-muted m-0"
+            >
+              Wege ({routesForActive.length})
+            </h3>
+            <button
+              class="inline-flex items-center gap-1.5 px-3 py-1.5 min-h-[34px] rounded-pill text-ink border bg-surface font-semibold text-xs shadow-understory hover:-translate-y-px hover:shadow-canopy"
+              aria-expanded={routeTypePickerOpen}
+              onclick={() => (routeTypePickerOpen = !routeTypePickerOpen)}
+            >
+              <Path size="1em" />
+              Weg zeichnen
+            </button>
+          </div>
+          {#if routeTypePickerOpen}
+            <div
+              class="grid grid-cols-2 gap-2 animate-rise"
+              role="group"
+              aria-label="Wegtyp wählen"
+            >
+              <button
+                class="inline-flex items-center justify-center gap-2 px-3 py-2 min-h-[38px] rounded-pill text-ink border bg-surface font-semibold text-xs shadow-understory hover:-translate-y-px hover:shadow-canopy"
+                onclick={() => startRouteDraw("anfahrt")}
+              >
+                <span
+                  class="inline-block w-6 h-[3px] rounded-full"
+                  style="background: #2563eb;"
+                ></span>
+                Anfahrt
+              </button>
+              <button
+                class="inline-flex items-center justify-center gap-2 px-3 py-2 min-h-[38px] rounded-pill text-ink border bg-surface font-semibold text-xs shadow-understory hover:-translate-y-px hover:shadow-canopy"
+                onclick={() => startRouteDraw("rueckegasse")}
+              >
+                <span
+                  class="inline-block w-6 h-[3px] rounded-full"
+                  style="background: repeating-linear-gradient(90deg, #60a5fa 0 4px, transparent 4px 8px);"
+                ></span>
+                Rückegasse
+              </button>
+            </div>
+          {/if}
+          {#if routesForActive.length === 0}
+            <p class="text-sm text-content-muted m-0">
+              Noch keine Wege gezeichnet.
+            </p>
+          {:else}
+            <ul class="flex flex-col gap-1.5 list-none p-0 m-0">
+              {#each routesForActive as r (r.id)}
+                <li
+                  class="flex items-center justify-between gap-3 px-3 py-2 rounded-btn bg-surface-muted border"
+                >
+                  <div class="flex items-center gap-2 min-w-0">
+                    <span
+                      class="inline-block w-6 h-[3px] rounded-full flex-shrink-0"
+                      style={r.routeType === "rueckegasse"
+                        ? "background: repeating-linear-gradient(90deg, #60a5fa 0 4px, transparent 4px 8px);"
+                        : "background: #2563eb;"}
+                      aria-hidden="true"
+                    ></span>
+                    <span class="text-sm text-ink font-medium truncate">
+                      {r.name ??
+                        ROUTE_TYPE_LABELS[
+                          r.routeType as keyof typeof ROUTE_TYPE_LABELS
+                        ]}
+                    </span>
+                  </div>
+                  <span class="text-xs text-content-muted whitespace-nowrap">
+                    {VEHICLE_TYPE_LABELS[
+                      r.vehicleType as keyof typeof VEHICLE_TYPE_LABELS
+                    ] ?? r.vehicleType}
+                  </span>
+                </li>
+              {/each}
+            </ul>
+          {/if}
+        </div>
+      </article>
+
+      <!-- ===== Bäume ===== -->
+      <article
+        class="flex flex-col gap-3 p-4 rounded-2xl bg-surface border shadow-understory"
+      >
+        <header class="flex items-start justify-between gap-3">
+          <div class="flex-1 min-w-0 flex flex-col gap-[2px]">
+            <span class="eyebrow">Bäume</span>
+            <h2
+              class="font-serif font-medium text-[1.25rem] leading-tight tracking-tight text-ink m-0"
+              style="font-variation-settings: 'opsz' 96, 'SOFT' 40, 'WONK' 1;"
+            >
+              {treesForActive.length} erfasst
+            </h2>
+          </div>
+        </header>
+
+        <div class="grid grid-cols-2 gap-2">
+          <button
+            class="inline-flex items-center justify-center gap-2 px-3 py-2.5 min-h-[42px] rounded-pill text-ink border bg-surface font-semibold text-sm shadow-understory hover:-translate-y-px hover:shadow-canopy"
+            onclick={startPlacement}
+          >
+            <Crosshair size="1.125em" />
+            <span>Baum platzieren</span>
+          </button>
+          <button
+            class="inline-flex items-center justify-center gap-2 px-3 py-2.5 min-h-[42px] rounded-pill text-ink border bg-surface font-semibold text-sm shadow-understory hover:-translate-y-px hover:shadow-canopy"
+            aria-pressed={officialTreesVisible}
+            onclick={toggleOfficialTrees}
+          >
+            <Tree size="1.125em" />
+            <span class="truncate">
+              {officialTreesLoading ? "Lade…"
+              : officialTreesVisible ? "Punkte aus"
+              : "Baum-Punkte"}
+            </span>
+          </button>
+          <button
+            class="col-span-2 inline-flex items-center justify-center gap-2 px-3 py-2.5 min-h-[42px] rounded-pill text-ink border bg-surface font-semibold text-sm shadow-understory hover:-translate-y-px hover:shadow-canopy"
+            onclick={countOfficialTrees}
+          >
+            <Calculator size="1.125em" />
+            <span>{treeCountLoading ? "Zähle…" : "Bäume zählen"}</span>
+          </button>
+        </div>
+
+        {#if treeActionError}
+          <div
+            class="rounded-btn bg-surface-muted border px-3 py-2 text-xs text-crimson"
+          >
+            {treeActionError}
+          </div>
+        {/if}
+        {#if treeCountResult != null}
+          <div
+            class="rounded-btn bg-surface-muted border px-3 py-2 text-xs text-content"
+          >
+            Offiziell gezählt: <strong>{treeCountResult}</strong> Bäume
+          </div>
+        {/if}
+
+        {#if treesForActive.length === 0}
+          <p class="text-sm text-content-muted m-0">
+            Noch keine Bäume erfasst. Tippe auf das Kamera-Symbol oben, um den
+            ersten Baum hier hinzuzufügen.
+          </p>
+        {:else}
+          <ul class="flex flex-col gap-1.5 list-none p-0 m-0">
+            {#each treesForActive as t (t.id)}
+              <li
+                class="flex items-center justify-between gap-3 px-3 py-2 rounded-btn border transition"
+                class:bg-surface-muted={!selectedTreeIds[t.id]}
+                style={selectedTreeIds[t.id]
+                  ? "background: color-mix(in srgb, var(--color-ember) 14%, var(--color-surface)); border-color: var(--color-rust);"
+                  : ""}
+              >
+                <div class="flex items-center gap-2 min-w-0">
+                  <span
+                    class="inline-block w-2.5 h-2.5 rounded-full flex-shrink-0"
+                    style="background: {t.healthStatus === 'healthy'
+                      ? '#5d7a4a'
+                      : t.healthStatus === 'must-watch'
+                        ? '#d4a23c'
+                        : t.healthStatus === 'infected'
+                          ? '#c76a2b'
+                          : '#4a4a4a'};"
+                    aria-hidden="true"
+                  ></span>
+                  <span class="text-sm text-ink font-medium truncate">
+                    {TREE_TYPE_LABELS[
+                      t.treeTypeId as keyof typeof TREE_TYPE_LABELS
+                    ] ?? t.treeTypeId}
+                  </span>
+                </div>
+                <span class="text-xs text-content-muted whitespace-nowrap">
+                  {HEALTH_LABELS[
+                    t.healthStatus as keyof typeof HEALTH_LABELS
+                  ] ?? t.healthStatus}
+                </span>
+              </li>
+            {/each}
+          </ul>
+        {/if}
+      </article>
+
+      <!-- ===== Bereich ===== -->
+      <article
+        class="flex flex-col gap-3 p-4 rounded-2xl bg-surface border shadow-understory"
+      >
+        <header class="flex items-start justify-between gap-3">
+          <div class="flex-1 min-w-0 flex flex-col gap-[2px]">
+            <span class="eyebrow">Bereich</span>
+            <h2
+              class="font-serif font-medium text-[1.25rem] leading-tight tracking-tight text-ink m-0"
+              style="font-variation-settings: 'opsz' 96, 'SOFT' 40, 'WONK' 1;"
+            >
+              {areasForActive.length} markiert
+            </h2>
+          </div>
+          <button
+            class="inline-flex items-center gap-1.5 px-3 py-2 min-h-[38px] rounded-pill text-earth border font-semibold text-xs shadow-understory hover:-translate-y-px hover:shadow-canopy"
+            style="background: var(--color-amber); border-color: color-mix(in srgb, var(--color-amber) 70%, black);"
+            onclick={startAreaDraw}
+          >
+            <PolygonIcon size="1em" weight="bold" />
+            Bereich zeichnen
+          </button>
+        </header>
+
+        <p class="text-xs text-content-muted m-0">
+          Mit dem Finger eine Fläche auf der Karte umkreisen — Anfang und Ende
+          werden automatisch verbunden, und die Bäume innerhalb werden
+          markiert.
+        </p>
+
+        {#if areaActionError}
+          <div
+            class="rounded-btn bg-surface-muted border px-3 py-2 text-xs text-crimson"
+          >
+            {areaActionError}
+          </div>
+        {/if}
+
+        {#if selectedAreaId}
+          {@const selectedCount = Object.keys(selectedTreeIds).length}
+          <div
+            class="rounded-btn border px-3 py-2 flex items-center justify-between gap-3"
+            style="background: color-mix(in srgb, var(--color-ember) 12%, var(--color-surface)); border-color: var(--color-rust);"
+          >
+            <div class="flex flex-col min-w-0">
+              <span class="eyebrow">Aktuelle Auswahl</span>
+              <span class="text-sm text-ink font-medium">
+                {selectedCount}
+                {selectedCount === 1 ? "Baum" : "Bäume"} im Bereich
+              </span>
+            </div>
+            <button
+              class="inline-flex items-center gap-1 px-3 py-1.5 min-h-[34px] rounded-pill text-ink border bg-surface font-semibold text-xs hover:border-pine"
+              onclick={clearSelection}
+            >
+              <X size="0.95em" weight="bold" />
+              Auswahl aufheben
+            </button>
+          </div>
+        {/if}
+
+        {#if areasForActive.length === 0}
+          <p class="text-sm text-content-muted m-0">
+            Noch keine Bereiche markiert.
+          </p>
+        {:else}
+          <ul class="flex flex-col gap-1.5 list-none p-0 m-0">
+            {#each areasForActive as a, i (a.id)}
+              {@const inside = treesInsideArea(a).length}
+              <li
+                class="flex items-center justify-between gap-3 px-3 py-2 rounded-btn border transition"
+                class:bg-surface-muted={a.id !== selectedAreaId}
+                style={a.id === selectedAreaId
+                  ? "background: color-mix(in srgb, var(--color-ember) 14%, var(--color-surface)); border-color: var(--color-rust);"
+                  : ""}
+              >
+                <button
+                  class="flex-1 min-w-0 flex items-center gap-2 bg-transparent border-0 p-0 text-left"
+                  onclick={() => selectArea(a.id)}
+                  aria-pressed={a.id === selectedAreaId}
+                >
+                  <span
+                    class="inline-block w-3 h-3 rounded-sm flex-shrink-0 border"
+                    style="background: color-mix(in srgb, #c98f2a 22%, transparent); border-color: #c98f2a;"
+                    aria-hidden="true"
+                  ></span>
+                  <span class="text-sm text-ink font-medium truncate">
+                    Bereich {String(i + 1).padStart(2, "0")}
+                  </span>
+                  <span class="text-xs text-content-muted whitespace-nowrap">
+                    · {inside}
+                    {inside === 1 ? "Baum" : "Bäume"}
+                  </span>
+                </button>
+                <button
+                  class="w-8 h-8 min-h-0 grid place-items-center rounded-full bg-transparent border text-content-muted hover:text-crimson hover:border-crimson"
+                  onclick={() => removeArea(a.id)}
+                  aria-label="Bereich löschen"
+                  title="Bereich löschen"
+                >
+                  <X size="0.95em" weight="bold" />
+                </button>
+              </li>
+            {/each}
+          </ul>
+        {/if}
+      </article>
+    </section>
+  {/if}
 </div>

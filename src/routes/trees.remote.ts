@@ -2,7 +2,8 @@ import { getRequestEvent, query, command } from '$app/server';
 import { error } from '@sveltejs/kit';
 import { z } from 'zod';
 import { db } from '$lib/server/db';
-import { forestPlots, trees, treeImages, accessRoutes } from '$lib/server/db/schema';
+import { forestPlots, trees, treeImages, accessRoutes, areas } from '$lib/server/db/schema';
+import { geomToGeoJson } from '$lib/server/db/geo';
 import { and, eq, sql } from 'drizzle-orm';
 import { presignUpload, treeImageKey } from '$lib/server/s3';
 import { TREE_TYPES, HEALTH_STATUSES, TREE_LABELS } from '$lib/enums';
@@ -107,7 +108,7 @@ export const getPlotOverview = query(z.string().uuid(), async (plotId) => {
     .limit(1);
   if (plot.length === 0) throw error(404, 'Waldstück nicht gefunden.');
 
-  const [treeRows, routeRows] = await Promise.all([
+  const [treeRows, routeRows, areaRows] = await Promise.all([
     db
       .select({
         id: trees.id,
@@ -130,8 +131,25 @@ export const getPlotOverview = query(z.string().uuid(), async (plotId) => {
         pathData: accessRoutes.pathData
       })
       .from(accessRoutes)
-      .where(eq(accessRoutes.plotId, plotId))
+      .where(eq(accessRoutes.plotId, plotId)),
+    db
+      .select({
+        id: areas.id,
+        comment: areas.comment,
+        appliedTreeStatus: areas.appliedTreeStatus,
+        geometry: geomToGeoJson(areas.geometry).as('geometry')
+      })
+      .from(areas)
+      .where(eq(areas.plotId, plotId))
   ]);
 
-  return { trees: treeRows, routes: routeRows };
+  return {
+    trees: treeRows,
+    routes: routeRows,
+    areas: areaRows.map((row) => ({
+      ...row,
+      geometry:
+        typeof row.geometry === 'string' ? JSON.parse(row.geometry) : row.geometry
+    }))
+  };
 });

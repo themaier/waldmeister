@@ -14,7 +14,8 @@ const secretKey = env.S3_SECRET_ACCESS_KEY;
 const forcePathStyle = env.S3_FORCE_PATH_STYLE === 'true';
 
 let client: S3Client | null = null;
-function getClient(): S3Client {
+/** Shared client for presign helpers and server-side downloads (e.g. Einzelbäume mirror). */
+export function getS3Client(): S3Client {
   if (client) return client;
   if (!endpoint || !accessKey || !secretKey || !bucket) {
     throw new Error('S3 is not configured — set S3_ENDPOINT, S3_BUCKET, S3_ACCESS_KEY_ID, S3_SECRET_ACCESS_KEY');
@@ -45,16 +46,16 @@ export async function presignUpload(key: string, contentType = 'image/jpeg'): Pr
     Key: key,
     ContentType: contentType
   });
-  return getSignedUrl(getClient(), cmd, { expiresIn: 60 * 5 });
+  return getSignedUrl(getS3Client(), cmd, { expiresIn: 60 * 5 });
 }
 
 export async function presignDownload(key: string): Promise<string> {
   if (!bucket) throw new Error('S3_BUCKET not set');
   const cmd = new GetObjectCommand({ Bucket: bucket, Key: key });
-  return getSignedUrl(getClient(), cmd, { expiresIn: 60 * 60 });
+  return getSignedUrl(getS3Client(), cmd, { expiresIn: 60 * 60 });
 }
 
 export async function deleteObject(key: string): Promise<void> {
   if (!bucket) return;
-  await getClient().send(new DeleteObjectCommand({ Bucket: bucket, Key: key }));
+  await getS3Client().send(new DeleteObjectCommand({ Bucket: bucket, Key: key }));
 }

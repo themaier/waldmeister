@@ -83,7 +83,7 @@
       center: initialCenter,
       zoom: initialZoom,
       maxZoom: 19,
-      attributionControl: { compact: true }
+      attributionControl: false
     });
 
     map.addControl(new maplibregl.NavigationControl({ visualizePitch: false }), 'top-right');

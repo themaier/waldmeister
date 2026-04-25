@@ -15,17 +15,33 @@ const createRouteSchema = z.object({
   vehicleType: z.enum(VEHICLE_TYPES),
   name: z.string().trim().max(120).nullable().optional(),
   comment: z.string().trim().max(2000).nullable().optional(),
-  pathData: z.object({
-    type: z.literal('LineString'),
-    coordinates: z
-      .array(
-        z
-          .tuple([z.number().min(-180).max(180), z.number().min(-90).max(90)])
-          // additional vertices accepted (z, m) but ignored downstream
-          .rest(z.number())
-      )
-      .min(2, 'Linie muss mindestens zwei Punkte enthalten.')
-  })
+  pathData: z.discriminatedUnion('type', [
+    z.object({
+      type: z.literal('LineString'),
+      coordinates: z
+        .array(
+          z
+            .tuple([z.number().min(-180).max(180), z.number().min(-90).max(90)])
+            // additional vertices accepted (z, m) but ignored downstream
+            .rest(z.number())
+        )
+        .min(2, 'Linie muss mindestens zwei Punkte enthalten.')
+    }),
+    z.object({
+      type: z.literal('MultiLineString'),
+      coordinates: z
+        .array(
+          z
+            .array(
+              z
+                .tuple([z.number().min(-180).max(180), z.number().min(-90).max(90)])
+                .rest(z.number())
+            )
+            .min(2, 'Jeder Strich muss mindestens zwei Punkte enthalten.')
+        )
+        .min(2, 'Mindestens zwei getrennte Striche nötig.')
+    })
+  ])
 });
 
 export const createRoute = command('unchecked', async (raw: unknown) => {

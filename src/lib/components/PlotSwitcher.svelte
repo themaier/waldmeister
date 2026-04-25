@@ -51,7 +51,8 @@
 </script>
 
 <header
-  class="relative z-20 bg-surface/85 border-b backdrop-blur-md backdrop-saturate-150"
+  class="sticky top-0 z-20 bg-surface/85 border-b backdrop-blur-md backdrop-saturate-150"
+  style="padding-top: env(safe-area-inset-top);"
 >
   <div class="flex items-center gap-3 px-4 py-2">
     <!-- Brand mark -->

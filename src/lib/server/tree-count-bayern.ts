@@ -10,6 +10,7 @@ import { sql } from 'drizzle-orm';
 import { readdir } from 'node:fs/promises';
 import path from 'node:path';
 import proj4 from 'proj4';
+import { ensureEinzelbaeumeMirrorFromS3 } from './einzelbaeume-s3';
 import { openReadOnlySqlite, type SqliteHandle } from './sqlite-driver';
 
 const DEFAULT_MIN_HEIGHT_M = 2;
@@ -30,8 +31,14 @@ export type OfficialTreeDot = {
   heightM: number | null;
 };
 
-const dataDir = () =>
-  env.BAYERN_EINZELBAEUME_DATA_DIR ?? path.join(process.cwd(), '.cache', 'einzelbaeume');
+async function resolvedDataDir(): Promise<string> {
+  if (env.BAYERN_EINZELBAEUME_DATA_DIR) return env.BAYERN_EINZELBAEUME_DATA_DIR;
+  const s3Configured = Boolean(
+    env.S3_ENDPOINT && env.S3_BUCKET && env.S3_ACCESS_KEY_ID && env.S3_SECRET_ACCESS_KEY
+  );
+  if (s3Configured) return ensureEinzelbaeumeMirrorFromS3();
+  return path.join(process.cwd(), '.cache', 'einzelbaeume');
+}
 
 function isPointInRing(point: Position, ring: Position[]): boolean {
   const [x, y] = point;
@@ -94,10 +101,11 @@ async function getPlotGeometryUtm(plotId: string, ownerId: string): Promise<Plot
 }
 
 // Find every `*_baeume.gpkg` whose declared extent intersects the plot's
-// bbox. The default `dataDir()` lookup means the user just drops the
-// official downloads into `.cache/einzelbaeume/`.
+// bbox. With S3 configured, files are mirrored once per process from
+// `S3_EINZELBAEUME_PREFIX` (default `einzelbaeume/`). Otherwise use
+// `BAYERN_EINZELBAEUME_DATA_DIR` or `.cache/einzelbaeume/`.
 async function findGeoPackagesForBounds(bounds: [number, number, number, number]): Promise<string[]> {
-  const dir = dataDir();
+  const dir = await resolvedDataDir();
   let files: string[];
   try {
     files = (await readdir(dir)).filter((file) => file.toLowerCase().endsWith('.gpkg'));

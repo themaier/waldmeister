@@ -162,7 +162,7 @@ export const accessRoutes = pgTable('access_routes', {
     .references(() => forestPlots.id, { onDelete: 'cascade' }),
   routeType: routeTypeEnum('route_type').notNull().default('anfahrt'),
   name: text('name'),
-  pathData: jsonb('path_data').notNull(), // GeoJSON LineString
+  pathData: jsonb('path_data').notNull(), // GeoJSON LineString or MultiLineString
   vehicleType: vehicleTypeEnum('vehicle_type').notNull().default('kleingerät'),
   comment: text('comment'),
   createdAt: timestamp('created_at').notNull().defaultNow(),
