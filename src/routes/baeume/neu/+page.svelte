@@ -1,6 +1,8 @@
 <script lang="ts">
   import { goto } from '$app/navigation';
   import { Camera, MapPin, Crosshair, Trash, Plus } from 'phosphor-svelte';
+  import Map from '$lib/components/Map.svelte';
+  import maplibregl from 'maplibre-gl';
   import {
     TREE_TYPES,
     TREE_TYPE_LABELS,
@@ -71,27 +73,114 @@
   let submitting = $state(false);
   let error = $state<string | null>(null);
   let gpsCapturing = $state(false);
+  let gpsFirstFixPending = $state(untrack(() => data.initial.latitude === null || data.initial.longitude === null));
+  let gpsMode = $state<'auto' | 'manual'>('auto');
+  let gpsImprovementCount = $state(0);
+  let gpsRefineStartedAt = $state<number | null>(null);
+  let gpsRefineLastImprovedAt = $state<number | null>(null);
+  let gpsWatchId = $state<number | null>(null);
+  let gpsRefineStopTimer = $state<number | null>(null);
+  let gpsAutoStarted = $state(false);
+  let gpsZoomBoostApplied = $state(false);
   let cameraInputEl = $state<HTMLInputElement | null>(null);
+  let mapRef = $state<{ instance: () => maplibregl.Map | null } | null>(null);
+  let marker = $state<maplibregl.Marker | null>(null);
 
   const lowAccuracy = $derived(gpsAccuracyM !== null && gpsAccuracyM > 10);
+  const gpsRefining = $derived(gpsCapturing && !gpsFirstFixPending);
+  const gpsRefineSeconds = $derived(
+    gpsRefineStartedAt === null ? 0 : Math.max(0, Math.round((Date.now() - gpsRefineStartedAt) / 1000))
+  );
+
+  const GPS_REFINE_MS = 45_000;
+
+  function stopGpsRefine() {
+    if (gpsWatchId !== null) {
+      navigator.geolocation.clearWatch(gpsWatchId);
+      gpsWatchId = null;
+    }
+    if (gpsRefineStopTimer !== null) {
+      window.clearTimeout(gpsRefineStopTimer);
+      gpsRefineStopTimer = null;
+    }
+    gpsCapturing = false;
+    gpsRefineStartedAt = null;
+  }
+
+  function acceptFixIfBetter(fix: { lat: number; lng: number; acc: number }) {
+    if (gpsMode !== 'auto') return;
+    if (gpsAccuracyM !== null && fix.acc >= gpsAccuracyM) return; // never worsen
+    latitude = fix.lat;
+    longitude = fix.lng;
+    gpsAccuracyM = fix.acc;
+    gpsFirstFixPending = false;
+    gpsImprovementCount += 1;
+    gpsRefineLastImprovedAt = Date.now();
+
+    const map = mapRef?.instance();
+    if (map) {
+      const nextZoom = gpsZoomBoostApplied ? map.getZoom() : Math.min(map.getZoom() + 6, 19);
+      gpsZoomBoostApplied = true;
+      map.flyTo({ center: [fix.lng, fix.lat], zoom: nextZoom, essential: true });
+    }
+  }
+
+  function setCoordsFromMarker(lng: number, lat: number) {
+    gpsMode = 'manual';
+    stopGpsRefine();
+    latitude = lat;
+    longitude = lng;
+    gpsAccuracyM = null; // manual placement
+  }
 
   async function retakeGps() {
     if (!('geolocation' in navigator)) {
       error = 'GPS nicht verfügbar.';
       return;
     }
+    error = null;
+    gpsMode = 'auto';
+    gpsImprovementCount = 0;
+    gpsRefineStartedAt = Date.now();
+    gpsRefineLastImprovedAt = null;
+    gpsFirstFixPending = true;
+    gpsZoomBoostApplied = false;
+    // Clear any previous manual accuracy label immediately so the user sees the reset.
+    gpsAccuracyM = null;
+    stopGpsRefine();
     gpsCapturing = true;
     try {
-      const fix = await getBetterGpsFix({ minWaitMs: 3000, maxWaitMs: 7000, desiredAccuracyM: 10 });
-      if (!fix) {
+      // Phase 1: first fix ASAP (UI shows marker immediately).
+      const first = await getBetterGpsFix({ minWaitMs: 0, maxWaitMs: 3500, desiredAccuracyM: 12, maximumAgeMs: 1500 });
+      if (!first) {
         error = 'GPS nicht verfügbar oder abgelehnt.';
         return;
       }
-      latitude = fix.lat;
-      longitude = fix.lng;
-      gpsAccuracyM = fix.acc;
+      acceptFixIfBetter(first);
+
+      // Phase 2: refine in background (only accept better accuracy).
+      gpsWatchId = navigator.geolocation.watchPosition(
+        (pos) => {
+          acceptFixIfBetter({
+            lat: pos.coords.latitude,
+            lng: pos.coords.longitude,
+            acc: pos.coords.accuracy
+          });
+
+          // If we're already very good, stop early.
+          if (gpsAccuracyM !== null && gpsAccuracyM <= 6 && gpsRefineSeconds >= 4) stopGpsRefine();
+        },
+        () => {
+          // Keep the current best fix; just stop refining.
+          stopGpsRefine();
+        },
+        { enableHighAccuracy: true, maximumAge: 0, timeout: GPS_REFINE_MS }
+      );
+
+      // Hard stop (diminishing returns; also battery/UX).
+      gpsRefineStopTimer = window.setTimeout(() => stopGpsRefine(), GPS_REFINE_MS);
     } finally {
-      gpsCapturing = false;
+      if (gpsFirstFixPending) gpsCapturing = false;
     }
   }
 
@@ -105,9 +194,11 @@
       getBetterGpsFix({ minWaitMs: 3000, maxWaitMs: 6500, desiredAccuracyM: 10 })
         .then((fix) => {
           if (!fix) return;
+          gpsMode = 'auto';
           latitude = fix.lat;
           longitude = fix.lng;
           gpsAccuracyM = fix.acc;
+          gpsFirstFixPending = false;
         })
         .finally(() => {
           gpsCapturing = false;
@@ -146,23 +237,22 @@
   }
 
   async function submit() {
+    // Hard guard against double-taps (mobile) causing multiple creates.
+    if (submitting) return;
+    submitting = true;
     error = null;
-    if (latitude === null || longitude === null) {
-      await retakeGps(); // triggers permission prompt if needed
+    try {
       if (latitude === null || longitude === null) {
-        error = 'Koordinaten fehlen.';
-        return;
+        await retakeGps(); // triggers permission prompt if needed
+        if (latitude === null || longitude === null) {
+          error = 'Koordinaten fehlen.';
+          return;
+        }
       }
-    }
-    if (images.length === 0) {
-      cameraInputEl?.click(); // triggers camera/picker prompt
       if (images.length === 0) {
         error = 'Bitte mindestens ein Foto hinzufügen.';
         return;
       }
-    }
-    submitting = true;
-    try {
       const planted =
         estPlantedAt ||
         (estPlantedAge && !isNaN(Number(estPlantedAge)) ? ageYearsToDate(Number(estPlantedAge)) : null);
@@ -209,11 +299,55 @@
           return;
         }
       }
-      await goto(`/baeume/${treeId}`);
+      // After creating, return to the overview so the user can continue capturing.
+      await goto(`/`);
     } finally {
       submitting = false;
     }
   }
+
+  $effect(() => {
+    const map = mapRef?.instance();
+    if (!map) return;
+
+    if (!marker) {
+      marker = new maplibregl.Marker({ color: '#0f4c2c', draggable: true })
+        .setLngLat([11.5, 48.5])
+        .addTo(map);
+
+      marker.on('dragend', () => {
+        const ll = marker!.getLngLat();
+        setCoordsFromMarker(ll.lng, ll.lat);
+      });
+    }
+
+    if (latitude !== null && longitude !== null) {
+      marker.setLngLat([longitude, latitude]);
+      // Auto mode: keep the current position centered (manual mode should not fight the user).
+      if (gpsMode === 'auto') {
+        // While capturing, acceptFixIfBetter drives the camera (and applies +4 zoom once).
+        // When not capturing, still keep the dot centered without changing zoom.
+        if (!gpsCapturing) map.flyTo({ center: [longitude, latitude], zoom: map.getZoom(), essential: true });
+      }
+    }
+  });
+
+  // Auto-start GPS once if the user arrived without coordinates.
+  $effect(() => {
+    if (gpsAutoStarted) return;
+    if (!gpsFirstFixPending) return;
+    if (gpsCapturing) return;
+    gpsAutoStarted = true;
+    retakeGps();
+  });
+
+  // Cleanup any active geolocation watch when navigating away.
+  $effect(() => {
+    return () => {
+      if (gpsWatchId !== null) navigator.geolocation.clearWatch(gpsWatchId);
+      if (gpsRefineStopTimer !== null) window.clearTimeout(gpsRefineStopTimer);
+    };
+  });
 </script>
 
 <div class="min-h-dvh bg-earth pb-14">
@@ -262,8 +396,16 @@
           >
             Position
           </h2>
-          {#if gpsCapturing}
-            <p class="text-xs font-semibold text-content-muted">GPS wird ermittelt …</p>
+          {#if gpsCapturing && gpsFirstFixPending}
+            <div class="inline-flex items-center gap-2 px-3 py-2 rounded-btn border bg-earth text-sm font-semibold text-content-muted">
+              <span class="spinner" aria-hidden="true"></span>
+              GPS wird ermittelt …
+            </div>
+          {:else if gpsRefining}
+            <div class="inline-flex items-center gap-2 px-3 py-2 rounded-btn border bg-earth text-sm font-semibold text-content-muted">
+              <span class="spinner" aria-hidden="true"></span>
+              Standort wird verbessert
+            </div>
           {/if}
           {#if latitude !== null && longitude !== null}
             <div class="inline-flex items-center gap-2 px-3 py-2 rounded-btn border border-dashed bg-earth font-mono text-[0.8125rem] text-content">
@@ -274,15 +416,14 @@
             </div>
             <p class="text-xs text-content-muted mt-2">
               Genauigkeit:
-              {#if gpsAccuracyM === null}unbekannt (manuell gesetzt){:else}±{gpsAccuracyM.toFixed(1)} m{/if}
+              {#if gpsAccuracyM === null}
+                {gpsMode === 'manual' ? 'unbekannt (manuell gesetzt)' : 'wird ermittelt'}
+              {:else}
+                ±{gpsAccuracyM.toFixed(1)} m
+              {/if}
             </p>
           {:else}
             <p class="text-sm text-content-muted">Keine Koordinaten.</p>
-          {/if}
-          {#if lowAccuracy}
-            <p class="text-xs mt-2 font-semibold" style="color: var(--color-rust);">
-              Geringe Genauigkeit — erneut erfassen?
-            </p>
           {/if}
         </div>
         <button
@@ -292,6 +433,19 @@
           <Crosshair size="1em" /> Erneut
         </button>
       </div>
+
+      <div class="rounded-btn overflow-hidden border bg-surface-muted h-[220px] w-full">
+        <Map
+          bind:this={mapRef}
+          initialCenter={[longitude ?? 11.5, latitude ?? 48.5]}
+          initialZoom={latitude !== null && longitude !== null ? 17 : 7}
+          class=""
+          onClick={({ lng, lat }) => setCoordsFromMarker(lng, lat)}
+        />
+      </div>
+      <p class="text-xs text-content-muted">
+        Marker ziehen oder tippen, um die Position manuell zu setzen.
+      </p>
     </section>
 
     <!-- Photos -->
@@ -337,7 +491,7 @@
           type="file"
           accept="image/*"
           capture="environment"
-          class="hidden"
+          class="sr-only"
           onchange={addPhoto}
         />
       </div>
@@ -434,3 +588,19 @@
     </section>
   </main>
 </div>
+
+<style>
+  .spinner {
+    width: 1em;
+    height: 1em;
+    border-radius: 999px;
+    border: 2px solid color-mix(in oklab, var(--color-ink) 18%, transparent);
+    border-top-color: color-mix(in oklab, var(--color-pine) 80%, transparent);
+    animation: spin 800ms linear infinite;
+  }
+  @keyframes spin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+</style>

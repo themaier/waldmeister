@@ -20,6 +20,13 @@ export type GetBetterGpsFixOptions = {
    * Keep this conservative; many phones won’t hit 2–3m quickly outdoors.
    */
   desiredAccuracyM?: number;
+  /**
+   * Use browser-cached positions up to this age (ms). Useful to avoid repeated
+   * sensor wakeups when the user taps multiple times quickly.
+   *
+   * Default: 0 (fresh fix).
+   */
+  maximumAgeMs?: number;
 };
 
 function sleep(ms: number): Promise<void> {
@@ -38,10 +45,27 @@ function sleep(ms: number): Promise<void> {
  * Returns `null` if geolocation is unavailable/denied/failed.
  */
 export async function getBetterGpsFix(opts: GetBetterGpsFixOptions = {}): Promise<GpsFix | null> {
+  if (typeof window === 'undefined') return null;
+  // Geolocation is only available in secure contexts (https / localhost).
+  if (!window.isSecureContext) return null;
   if (!('geolocation' in navigator)) return null;
+
+  // If supported, preflight permissions so we can fail fast (and avoid
+  // repeated prompts / noisy errors) when already denied.
+  try {
+    const perms = (navigator as Navigator & { permissions?: Permissions }).permissions;
+    if (perms?.query) {
+      const st = await perms.query({ name: 'geolocation' as PermissionName });
+      if (st.state === 'denied') return null;
+    }
+  } catch {
+    // Ignore: permissions API not available / blocked.
+  }
+
   const minWaitMs = opts.minWaitMs ?? 3000;
   const maxWaitMs = opts.maxWaitMs ?? 3500;
   const desiredAccuracyM = opts.desiredAccuracyM ?? 10;
+  const maximumAgeMs = opts.maximumAgeMs ?? 0;
 
   const start = Date.now();
   const minDoneAt = start + minWaitMs;
@@ -83,7 +107,8 @@ export async function getBetterGpsFix(opts: GetBetterGpsFixOptions = {}): Promis
         () => finish(null),
         {
           enableHighAccuracy: true,
-          maximumAge: 0
+          maximumAge: maximumAgeMs,
+          timeout: Math.max(250, maxWaitMs)
         }
       );
 
