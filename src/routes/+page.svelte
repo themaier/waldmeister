@@ -20,6 +20,7 @@
     Crosshair,
     X,
     Tree,
+    TreeEvergreen,
     Calculator,
     Path,
     Polygon as PolygonIcon,
@@ -1096,7 +1097,16 @@
             aria-label="Baum hier fotografieren"
             title="Baum hier fotografieren"
           >
-            <Camera size="1.5em" weight="fill" />
+            <span class="relative grid place-items-center">
+              <TreeEvergreen size="1.75em" weight="fill" />
+              <span
+                class="absolute grid place-items-center w-4 h-4 rounded-full"
+                style="top: 0; right: 0; transform: translate(40%, -40%); background: var(--color-pine);"
+                aria-hidden="true"
+              >
+                <Plus size="0.7em" weight="bold" />
+              </span>
+            </span>
           </button>
         {/if}
       </div>
