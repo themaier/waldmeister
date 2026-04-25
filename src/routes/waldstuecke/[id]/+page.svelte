@@ -4,6 +4,7 @@
   import { ArrowLeft, Tree, MapPin, Camera, Polygon, PencilSimple, Trash, Plus, MapTrifold } from 'phosphor-svelte';
   import { renamePlot, deletePlot } from '../../plots.remote';
   import { createBoundaryStone, deleteBoundaryStone, updateBoundaryStone } from '../../boundary-stones.remote';
+  import { getBetterGpsFix, type GpsFix } from '$lib/gps';
 
   let { data }: { data: PageData } = $props();
 
@@ -11,6 +12,8 @@
   let stonePreview = $state<string | null>(null);
   let stoneDescription = $state('');
   let stoneCaptureGps = $state(true);
+  let stoneGps = $state<GpsFix | null>(null);
+  let stoneGpsCapturing = $state(false);
   let stoneSubmitting = $state(false);
   let stoneError = $state<string | null>(null);
   let editing = $state<Record<string, string>>({});
@@ -43,6 +46,18 @@
     if (stonePreview) URL.revokeObjectURL(stonePreview);
     stoneFile = f;
     stonePreview = URL.createObjectURL(f);
+    stoneError = null;
+    stoneGps = null;
+    if (stoneCaptureGps && !stoneGpsCapturing) {
+      stoneGpsCapturing = true;
+      getBetterGpsFix({ minWaitMs: 3000, maxWaitMs: 6500, desiredAccuracyM: 10 })
+        .then((fix) => {
+          stoneGps = fix;
+        })
+        .finally(() => {
+          stoneGpsCapturing = false;
+        });
+    }
     input.value = '';
   }
 
@@ -52,17 +67,8 @@
     stonePreview = null;
     stoneDescription = '';
     stoneError = null;
-  }
-
-  async function getGpsOnce(): Promise<{ lat: number; lng: number; acc: number } | null> {
-    if (!('geolocation' in navigator)) return null;
-    return new Promise((resolve) => {
-      navigator.geolocation.getCurrentPosition(
-        (pos) => resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude, acc: pos.coords.accuracy }),
-        () => resolve(null),
-        { enableHighAccuracy: true, timeout: 8000 }
-      );
-    });
+    stoneGps = null;
+    stoneGpsCapturing = false;
   }
 
   async function submitStone() {
@@ -74,7 +80,11 @@
     stoneError = null;
     try {
       const { width, height } = await imageSize(stonePreview);
-      const gps = stoneCaptureGps ? await getGpsOnce() : null;
+      const gps =
+        stoneCaptureGps
+          ? stoneGps ??
+            (await getBetterGpsFix({ minWaitMs: 3000, maxWaitMs: 7000, desiredAccuracyM: 10 }))
+          : null;
 
       let result: { id: string; uploadUrl: string; contentType: string };
       try {
@@ -308,6 +318,17 @@
             onchange={pickStoneFile}
           />
         </label>
+
+        {#if stoneCaptureGps && (stoneGpsCapturing || stoneGps)}
+          <div class="text-xs text-content-muted">
+            {#if stoneGpsCapturing}
+              GPS wird ermittelt …
+            {:else if stoneGps}
+              Standort: <span class="font-mono">{stoneGps.lat.toFixed(5)}, {stoneGps.lng.toFixed(5)}</span>
+              · ±{stoneGps.acc.toFixed(0)} m
+            {/if}
+          </div>
+        {/if}
 
         <textarea
           class="w-full px-3 py-2 min-h-[64px] rounded-btn border bg-surface text-[0.9rem] text-ink focus:outline-none focus:border-pine focus:shadow-ring-focus transition"
