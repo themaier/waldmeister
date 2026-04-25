@@ -39,7 +39,16 @@ const treeStatusSchema = z.object({
 });
 
 export const updateContractorTreeStatus = command('unchecked', async (raw: unknown) => {
-  const { url } = getRequestEvent();
+  // `getRequestEvent()` is only available when the command runs within an actual request.
+  // Depending on how the remote command is invoked/bundled, this can throw; the status update
+  // itself must still succeed, so we treat origin as best-effort.
+  let origin: string | null = null;
+  try {
+    origin = getRequestEvent().url.origin;
+  } catch {
+    origin = null;
+  }
+
   const parsed = treeStatusSchema.safeParse(raw);
   if (!parsed.success) throw error(400, parsed.error.issues[0].message);
   const input = parsed.data;
@@ -91,16 +100,21 @@ export const updateContractorTreeStatus = command('unchecked', async (raw: unkno
         .from(users)
         .where(eq(users.id, order.ownerId));
       if (owner?.email) {
-        const mail = renderWorkOrderCompletedEmail({
-          title: order.title,
-          completedAt: new Date(),
-          done: all.filter((t) => t.status === 'COMPLETED').length,
-          problems: all.filter((t) => t.status === 'PROBLEM').length,
-          notFound: all.filter((t) => t.status === 'NOT_FOUND').length,
-          workerNotes: order.workerNotes,
-          orderUrl: `${url.origin}/auftraege/${order.id}`
-        });
-        sendMail({ to: owner.email, ...mail }).catch((e) => console.error('email failed', e));
+        try {
+          const mail = renderWorkOrderCompletedEmail({
+            title: order.title,
+            completedAt: new Date(),
+            done: all.filter((t) => t.status === 'COMPLETED').length,
+            problems: all.filter((t) => t.status === 'PROBLEM').length,
+            notFound: all.filter((t) => t.status === 'NOT_FOUND').length,
+            workerNotes: order.workerNotes,
+            orderUrl: `${origin ?? ''}/auftraege/${order.id}`
+          });
+          sendMail({ to: owner.email, ...mail }).catch((e) => console.error('email failed', e));
+        } catch (e) {
+          // Never fail the status update due to notification issues.
+          console.error('work order completion notification failed', e);
+        }
       }
     }
   } else {

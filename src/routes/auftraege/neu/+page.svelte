@@ -1,9 +1,10 @@
 <script lang="ts">
   import type { PageData } from './$types';
-  import { goto } from '$app/navigation';
   import { page } from '$app/state';
-  import { ArrowLeft, ArrowRight, Tree, Polygon } from 'phosphor-svelte';
+  import { onMount } from 'svelte';
+  import { ArrowLeft, ArrowRight, Tree, Polygon, Copy, Link as LinkIcon, Check, WhatsappLogo, X } from 'phosphor-svelte';
   import { HEALTH_LABELS, HEALTH_COLORS, TREE_TYPE_LABELS, TREE_LABEL_LABELS } from '$lib/enums';
+  import { createWorkOrder } from './create-work-order.remote';
 
   let { data }: { data: PageData } = $props();
 
@@ -17,6 +18,10 @@
   let preset = $state<'standard' | 'minimal' | 'custom'>('standard');
   let submitting = $state(false);
   let error = $state<string | null>(null);
+  let shareOverlay = $state<{ orderId: string | null; shareUrl: string | null; title: string } | null>(null);
+  let copied = $state(false);
+  let overlayCloseArmed = $state(false);
+  let overlayError = $state<string | null>(null);
 
   let vis = $state({
     anfahrten: true,
@@ -62,6 +67,30 @@
     return '/auftraege';
   });
 
+  onMount(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') shareOverlay = null;
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  });
+
+  async function copyLink() {
+    if (!shareOverlay?.shareUrl) return;
+    await navigator.clipboard.writeText(shareOverlay.shareUrl);
+    copied = true;
+    setTimeout(() => (copied = false), 2000);
+  }
+
+  function remoteErrorMessage(e: unknown): string {
+    if (e && typeof e === 'object' && 'body' in e) {
+      const msg = (e as { body?: { message?: string } }).body?.message;
+      if (msg) return msg;
+    }
+    if (e instanceof Error) return e.message;
+    return 'Speichern fehlgeschlagen.';
+  }
+
   async function submit(e: SubmitEvent) {
     e.preventDefault();
     error = null;
@@ -84,26 +113,25 @@
     }
 
     submitting = true;
+    shareOverlay = { orderId: null, shareUrl: null, title: title.trim() };
+    copied = false;
+    overlayCloseArmed = false;
+    overlayError = null;
+    // Prevent the submit click from immediately closing the freshly opened overlay.
+    queueMicrotask(() => (overlayCloseArmed = true));
     try {
-      const fd = new FormData();
-      fd.set('payload', JSON.stringify({
+      const { orderId, shareUrl } = await createWorkOrder({
         title: title.trim(),
         instructions,
         selection,
         visibility: vis
-      }));
-      // In this app, creating a work order succeeds even when the response
-      // appears as an "internal error" to `fetch()` (redirects/actions).
-      // UX requirement: always return to the overview after submit.
-      try {
-        await fetch('', { method: 'POST', body: fd });
-      } catch {
-        // Intentionally ignored — we still return to overview.
-      }
-      await goto('/auftraege');
+      });
+      shareOverlay.orderId = orderId;
+      shareOverlay.shareUrl = shareUrl;
+    } catch (e) {
+      overlayError = remoteErrorMessage(e);
     } finally {
       submitting = false;
-      error = null;
     }
   }
 
@@ -355,4 +383,92 @@
       <ArrowRight size="1.125em" weight="bold" />
     </button>
   </form>
+
+  {#if shareOverlay}
+    <div
+      class="fixed inset-0 z-50 bg-black/40 backdrop-blur-[2px] px-4 py-6 grid place-items-center"
+      role="presentation"
+      onpointerdown={() => {
+        if (!overlayCloseArmed) return;
+        shareOverlay = null;
+      }}
+    >
+      <div
+        class="w-full max-w-lg bg-surface border rounded-box shadow-canopy overflow-hidden"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Link teilen"
+        onpointerdown={(e) => e.stopPropagation()}
+        onclick={(e) => e.stopPropagation()}
+        onkeydown={(e) => e.stopPropagation()}
+        tabindex="-1"
+      >
+        <div class="px-5 py-4 flex items-start justify-between gap-3 border-b border-hairline">
+          <div class="flex flex-col gap-1 min-w-0">
+            <span class="eyebrow">Auftrag erstellt</span>
+            <h2 class="font-serif font-medium text-[1.125rem] tracking-tight text-ink m-0 truncate">
+              Link teilen
+            </h2>
+          </div>
+          <button
+            type="button"
+            class="w-[38px] h-[38px] grid place-items-center rounded-btn border bg-earth text-ink hover:border-pine transition"
+            aria-label="Schließen"
+            onclick={() => (shareOverlay = null)}
+          >
+            <X size="1.125em" weight="bold" />
+          </button>
+        </div>
+
+        <div class="px-5 py-5 grid gap-4">
+          <div class="flex flex-wrap items-stretch gap-2">
+            <div
+              class="flex-1 min-w-0 inline-flex items-center gap-2 px-3 py-2 min-h-[44px] rounded-btn border border-dashed bg-earth text-content text-xs font-mono"
+            >
+              <LinkIcon size="0.875em" weight="bold" />
+              <span class="text-ink break-all leading-snug">
+                {shareOverlay.shareUrl ?? 'Link wird erstellt …'}
+              </span>
+            </div>
+            <button
+              type="button"
+              class="inline-flex items-center gap-2 px-4 py-2 min-h-[44px] rounded-btn text-earth border font-semibold text-sm focus-ring"
+              style="background: var(--color-pine); border-color: var(--color-pine-deep);"
+              onclick={copyLink}
+              disabled={!shareOverlay.shareUrl}
+            >
+              {#if copied}<Check size="1em" weight="bold" /> Kopiert{:else}<Copy size="1em" /> Kopieren{/if}
+            </button>
+          </div>
+
+          {#if overlayError}
+            <div class="alert alert-error text-sm">{overlayError}</div>
+          {/if}
+
+          <div class="flex flex-wrap gap-2">
+            <a
+              class="inline-flex items-center gap-2 px-3 py-2 min-h-[40px] rounded-pill bg-earth border text-content text-[0.8125rem] no-underline hover:border-pine hover:text-ink"
+              target="_blank"
+              rel="noopener"
+              href={shareOverlay.shareUrl ? `https://wa.me/?text=${encodeURIComponent(shareOverlay.title + ' — ' + shareOverlay.shareUrl)}` : undefined}
+              aria-disabled={!shareOverlay.shareUrl}
+            >
+              <WhatsappLogo size="1em" weight="fill" /> Per WhatsApp
+            </a>
+            <a
+              class="inline-flex items-center gap-2 px-3 py-2 min-h-[40px] rounded-pill bg-earth border text-content text-[0.8125rem] no-underline hover:border-pine hover:text-ink"
+              href={shareOverlay.orderId ? `/auftraege/${shareOverlay.orderId}` : undefined}
+              aria-disabled={!shareOverlay.orderId}
+            >
+              Auftrag öffnen <ArrowRight size="1em" weight="bold" />
+            </a>
+          </div>
+
+          <p class="text-xs text-content-muted leading-relaxed m-0">
+            Tipp: Klick außerhalb schließt den Dialog (oder Esc).
+          </p>
+        </div>
+      </div>
+    </div>
+  {/if}
 </div>
