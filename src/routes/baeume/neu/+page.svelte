@@ -1,7 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { goto } from '$app/navigation';
-  import { page } from '$app/state';
   import { activePlotStore } from '$lib/stores/active-plot.svelte';
   import { Camera, MapPin, Crosshair, Trash, Plus } from 'phosphor-svelte';
   import Map from '$lib/components/Map.svelte';
@@ -396,18 +395,8 @@
           return;
         }
       }
-      // Return to the map (or other caller via ?from=) and refresh list data.
-      const from = page.url.searchParams.get('from');
-      let target =
-        from && from.startsWith('/') && !from.startsWith('//') ? from : '/';
-      // A nested `from` (e.g. opening Baum anlegen twice) can point at this
-      // route — never use that as the post-save destination.
-      if (target === '/baeume/neu' || target.startsWith('/baeume/neu?')) {
-        target = '/';
-      }
       activePlotStore.persistSessionPlot(data.plot.id);
-      await goto(target, { replaceState: true, invalidateAll: true });
-      activePlotStore.set(data.plot.id);
+      await goto('/', { invalidateAll: true });
     } finally {
       submitting = false;
     }
