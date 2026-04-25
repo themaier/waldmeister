@@ -3,6 +3,7 @@
   // One persistent MapLibre instance; we switch "active" plot by flying the
   // camera rather than navigating routes.
 
+  import { onMount } from "svelte";
   import { goto } from "$app/navigation";
   import { invalidateAll } from "$app/navigation";
   import { activePlotStore } from "$lib/stores/active-plot.svelte";
@@ -52,7 +53,9 @@
   // Seed the session store from the load-resolved `?plot=ID` (set by the
   // Waldstück-creation redirect). Synchronous init — runs once on mount,
   // which matches the only entry path: a fresh navigation from /waldstuecke/neu.
-  if (data.requestedPlotId) activePlotStore.set(data.requestedPlotId);
+  onMount(() => {
+    if (data.requestedPlotId) activePlotStore.set(data.requestedPlotId);
+  });
 
   let mapRef = $state<Map | undefined>();
   // Remembered selection (session-scoped store) wins while the plot still

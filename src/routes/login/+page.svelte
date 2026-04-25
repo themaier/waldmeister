@@ -35,7 +35,7 @@
   <Mascot
     track
     class="hidden lg:block pointer-events-none select-none absolute"
-    style="bottom: 0; left: clamp(0rem, 5vw, 7rem); height: 100%; aspect-ratio: 480 / 800; z-index: 5;"
+    style="bottom: 0; left: clamp(0rem, 6vw, 9rem); height: 84%; aspect-ratio: 480 / 800; z-index: 5;"
   />
 
   <!-- Editorial aside -->

@@ -30,12 +30,9 @@
       const dx = (e.clientX - sx) / scale;
       const dy = (e.clientY - sy) / scale;
 
-      // Direction toward mouse, clamped to forward hemisphere so the arm doesn't snap behind.
       let a1 = Math.atan2(dy, dx);
       a1 = Math.max(-Math.PI / 2.2, Math.min(Math.PI / 2.2, a1));
 
-      // Extension factor: 0 at the shoulder column, 1 at viewport right + 6% (slightly past the page).
-      // This keeps the arm bent through most of the right side and only fully stretches past the edge.
       const rightTarget = window.innerWidth * 1.06;
       const ext = Math.max(0, Math.min(1, (e.clientX - sx) / Math.max(1, rightTarget - sx)));
 
@@ -43,7 +40,6 @@
       const maxD = L1 + L2 - 4;
       const d = minD + ext * (maxD - minD);
 
-      // 2-bone IK via law of cosines, elbow biased downward so both joints visibly move with the cursor.
       const cosShoulder = (L1 * L1 + d * d - L2 * L2) / (2 * L1 * d);
       const cosElbow = (L1 * L1 + L2 * L2 - d * d) / (2 * L1 * L2);
       const shoulderInner = Math.acos(Math.max(-1, Math.min(1, cosShoulder)));
@@ -102,10 +98,10 @@
   <!-- Ground shadow -->
   <ellipse cx="240" cy="780" rx="170" ry="11" fill="#000" opacity="0.5" filter="url(#m-soft)" />
 
-  <!-- Cloak silhouette — raised neckline so head sits on shoulders without an elongated neck -->
+  <!-- Cloak — high collar comes right up to the chin so there's no neck -->
   <path
-    d="M 224 220
-       C 218 224, 200 234, 194 252
+    d="M 218 230
+       C 210 236, 198 246, 194 252
        L 184 300
        C 166 308, 154 334, 148 372
        L 120 770
@@ -120,8 +116,8 @@
        L 332 372
        C 326 334, 314 308, 296 300
        L 286 252
-       C 280 234, 262 224, 256 220
-       L 224 220 Z"
+       C 282 246, 270 236, 262 230
+       Q 240 224, 218 230 Z"
     fill="url(#m-cloak)"
   />
 
@@ -132,152 +128,97 @@
   <path d="M 260 340 L 265 760" stroke="#070d09" stroke-width="1" opacity="0.4" fill="none" />
   <path d="M 284 320 L 312 752" stroke="#070d09" stroke-width="1.4" opacity="0.55" fill="none" />
 
-  <!-- Shoulder rim highlight -->
-  <path d="M 198 240 C 222 222, 258 222, 282 240" stroke="#5d7a4a" stroke-width="1.2" opacity="0.4" fill="none" />
-  <!-- Collar fold -->
-  <path d="M 196 254 C 220 246, 260 246, 284 254" stroke="#070d09" stroke-width="1.6" opacity="0.7" fill="none" />
+  <!-- Collar fold (single subtle line at the seam) -->
+  <path d="M 200 252 C 222 244, 258 244, 280 252" stroke="#070d09" stroke-width="1.4" opacity="0.6" fill="none" />
 
-  <!-- Shoulder leaves (forest growth) -->
-  <path d="M 200 264 C 192 258, 184 264, 188 272 C 196 274, 204 270, 200 264 Z" fill="#3d5b30" />
-  <path d="M 196 268 C 198 274, 204 274, 202 270 Z" fill="#5d7a4a" />
-  <path d="M 280 264 C 288 258, 296 264, 292 272 C 284 274, 276 270, 280 264 Z" fill="#3d5b30" />
-  <path d="M 284 268 C 282 274, 276 274, 278 270 Z" fill="#5d7a4a" />
+  <!-- Head (skin) — sits directly on the collar -->
+  <ellipse cx="240" cy="186" rx="36" ry="40" fill="url(#m-skin)" />
+  <ellipse cx="222" cy="206" rx="6" ry="5" fill="#d6b88a" opacity="0.18" />
+  <ellipse cx="258" cy="206" rx="6" ry="5" fill="#d6b88a" opacity="0.18" />
 
-  <!-- Head (skin) — bare, no hood -->
-  <ellipse cx="240" cy="186" rx="38" ry="42" fill="url(#m-skin)" />
-  <!-- Subtle skin highlight to suggest cheek -->
-  <ellipse cx="222" cy="208" rx="6" ry="5" fill="#d6b88a" opacity="0.18" />
-  <ellipse cx="258" cy="208" rx="6" ry="5" fill="#d6b88a" opacity="0.18" />
-
-  <!-- Leafy beard — drawn before the smile so the smile sits on top -->
+  <!-- Hat — denser leaf pile, lots of distinct leaves at varied angles -->
   <g>
-    <!-- Outer base shadow -->
+    <!-- Brim with a leafy uneven edge -->
     <path
-      d="M 206 218
-         C 198 240, 204 270, 222 282
-         C 236 288, 244 288, 258 282
-         C 276 270, 282 240, 274 218
-         C 258 232, 240 234, 222 232
-         C 216 228, 210 224, 206 218 Z"
-      fill="#162513"
-    />
-    <!-- Dark mid layer -->
-    <path
-      d="M 212 222
-         C 206 244, 212 270, 226 278
-         C 240 282, 254 278, 254 278
-         C 268 270, 274 244, 268 222
-         C 254 232, 240 234, 226 232 Z"
-      fill="#243d1d"
-    />
-    <!-- Side leaf cluster -->
-    <path d="M 216 232 C 208 248, 210 270, 224 274 C 230 264, 226 250, 220 234 Z" fill="#2a4422" />
-    <path d="M 264 232 C 272 248, 270 270, 256 274 C 250 264, 254 250, 260 234 Z" fill="#2a4422" />
-    <!-- Hanging center mass -->
-    <path
-      d="M 224 240
-         C 218 260, 226 280, 240 282
-         C 254 280, 262 260, 256 240
-         C 248 250, 232 250, 224 240 Z"
-      fill="#3d5b30"
-    />
-    <!-- Inner leaves -->
-    <path d="M 222 250 C 216 262, 222 274, 230 270 C 232 262, 228 254, 222 250 Z" fill="#4f6c3a" />
-    <path d="M 258 250 C 264 262, 258 274, 250 270 C 248 262, 252 254, 258 250 Z" fill="#4f6c3a" />
-    <path d="M 234 256 C 230 270, 240 282, 244 270 C 244 264, 240 258, 234 256 Z" fill="#5d7a4a" />
-    <path d="M 246 256 C 250 270, 240 282, 236 270 C 236 264, 240 258, 246 256 Z" fill="#5d7a4a" />
-    <!-- Highlight tips -->
-    <path d="M 230 264 C 228 272, 234 276, 234 268 C 234 266, 232 264, 230 264 Z" fill="#7aa36a" />
-    <path d="M 250 264 C 252 272, 246 276, 246 268 C 246 266, 248 264, 250 264 Z" fill="#7aa36a" />
-    <!-- Tucked under chin -->
-    <path d="M 218 222 C 214 232, 220 236, 224 230 C 224 226, 220 222, 218 222 Z" fill="#3d5b30" />
-    <path d="M 262 222 C 266 232, 260 236, 256 230 C 256 226, 260 222, 262 222 Z" fill="#3d5b30" />
-    <!-- Vein details -->
-    <path d="M 222 234 Q 224 250, 226 268" stroke="#162513" stroke-width="0.7" fill="none" opacity="0.6" />
-    <path d="M 258 234 Q 256 250, 254 268" stroke="#162513" stroke-width="0.7" fill="none" opacity="0.6" />
-    <path d="M 240 246 Q 240 262, 240 278" stroke="#243d1d" stroke-width="0.8" fill="none" opacity="0.7" />
-    <!-- Tiny berry accents -->
-    <circle cx="232" cy="240" r="1.4" fill="#962a2a" opacity="0.85" />
-    <circle cx="248" cy="240" r="1.4" fill="#962a2a" opacity="0.85" />
-    <circle cx="240" cy="266" r="1.2" fill="#c98f2a" opacity="0.8" />
-  </g>
-
-  <!-- Hat — sits directly on the head, brim pulled low to hide the upper face -->
-  <g>
-    <!-- Outer brim wraps the head, sticking out a touch -->
-    <path
-      d="M 156 200
-         C 168 184, 196 174, 240 174
-         C 284 174, 312 184, 324 200
-         C 314 212, 282 210, 240 210
-         C 198 210, 166 212, 156 200 Z"
+      d="M 154 204
+         C 158 196, 168 188, 180 188
+         C 188 184, 196 188, 204 184
+         C 214 180, 224 184, 232 180
+         C 240 176, 248 180, 256 180
+         C 264 184, 274 180, 282 184
+         C 292 188, 304 192, 312 196
+         C 320 200, 322 208, 318 212
+         C 308 216, 296 212, 282 214
+         C 266 216, 250 214, 240 214
+         C 226 214, 210 216, 196 214
+         C 182 212, 170 216, 162 212
+         C 156 210, 152 208, 154 204 Z"
       fill="#1f3520"
     />
-    <!-- Brim highlight -->
+    <!-- Brim highlight along the top -->
+    <path d="M 168 196 C 192 188, 240 184, 290 188 C 306 192, 310 198, 296 198 C 240 194, 200 198, 174 200 C 168 200, 168 198, 168 196 Z" fill="#3d5b30" opacity="0.7" />
+
+    <!-- Lower leaf layer — many distinct leaves -->
+    <path d="M 168 192 C 158 178, 168 156, 184 162 C 188 174, 184 188, 168 192 Z" fill="#2a4422" />
+    <path d="M 188 184 C 178 168, 188 148, 204 152 C 210 168, 204 184, 188 184 Z" fill="#3d5b30" />
+    <path d="M 210 178 C 200 162, 212 142, 226 148 C 232 162, 224 180, 210 178 Z" fill="#4f6c3a" />
+    <path d="M 240 174 C 232 156, 248 144, 256 152 C 260 168, 252 180, 240 174 Z" fill="#3d5b30" />
+    <path d="M 268 178 C 280 162, 268 142, 254 148 C 248 162, 256 180, 268 178 Z" fill="#4f6c3a" />
+    <path d="M 290 184 C 300 168, 290 148, 274 152 C 268 168, 274 184, 290 184 Z" fill="#3d5b30" />
+    <path d="M 308 192 C 320 180, 312 156, 296 162 C 290 174, 296 188, 308 192 Z" fill="#2a4422" />
+
+    <!-- Mid leaf layer -->
+    <path d="M 184 162 C 174 142, 188 122, 204 130 C 208 146, 200 162, 184 162 Z" fill="#3d5b30" />
+    <path d="M 210 144 C 202 124, 218 104, 232 116 C 234 132, 224 148, 210 144 Z" fill="#5d7a4a" />
+    <path d="M 240 138 C 232 118, 250 102, 258 116 C 260 132, 252 148, 240 138 Z" fill="#4f6c3a" />
+    <path d="M 270 144 C 280 124, 264 104, 250 116 C 248 132, 258 148, 270 144 Z" fill="#5d7a4a" />
+    <path d="M 296 162 C 306 142, 294 122, 278 130 C 274 146, 282 162, 296 162 Z" fill="#3d5b30" />
+
+    <!-- Upper leaves (top crown) -->
+    <path d="M 206 122 C 200 100, 218 86, 230 100 C 232 114, 220 128, 206 122 Z" fill="#5d7a4a" />
+    <path d="M 230 110 C 226 88, 246 78, 252 96 C 250 112, 240 122, 230 110 Z" fill="#7aa36a" />
+    <path d="M 250 110 C 254 88, 234 78, 228 96 C 230 112, 240 122, 250 110 Z" fill="#7aa36a" />
+    <path d="M 274 122 C 280 100, 262 86, 250 100 C 248 114, 260 128, 274 122 Z" fill="#5d7a4a" />
+
+    <!-- Cap top sprigs -->
+    <path d="M 234 96 C 226 70, 240 58, 246 80 C 244 92, 238 100, 234 96 Z" fill="#4f6c3a" />
+    <path d="M 248 80 Q 256 56, 262 44" stroke="#3d5b30" stroke-width="1.8" fill="none" stroke-linecap="round" />
+    <path d="M 262 44 C 256 38, 268 30, 272 40 C 270 50, 266 50, 262 44 Z" fill="#5d7a4a" />
+    <path d="M 244 70 Q 240 50, 236 38" stroke="#3d5b30" stroke-width="1.4" fill="none" stroke-linecap="round" />
+    <path d="M 236 38 C 230 36, 234 28, 240 30 C 242 36, 238 40, 236 38 Z" fill="#7aa36a" />
+
+    <!-- Side small leaves spilling out of the brim -->
+    <path d="M 152 200 C 144 196, 142 204, 148 208 C 154 208, 156 204, 152 200 Z" fill="#3d5b30" />
+    <path d="M 164 212 C 156 214, 158 220, 164 218 C 168 216, 168 212, 164 212 Z" fill="#5d7a4a" />
+    <path d="M 322 200 C 330 196, 332 204, 326 208 C 320 208, 318 204, 322 200 Z" fill="#3d5b30" />
+    <path d="M 312 212 C 320 214, 318 220, 312 218 C 308 216, 308 212, 312 212 Z" fill="#5d7a4a" />
+
+    <!-- Vein details on a few prominent leaves -->
+    <path d="M 226 100 Q 226 116, 226 130" stroke="#243d1d" stroke-width="0.7" fill="none" opacity="0.55" />
+    <path d="M 254 100 Q 254 116, 254 130" stroke="#243d1d" stroke-width="0.7" fill="none" opacity="0.55" />
+    <path d="M 196 168 Q 198 178, 198 188" stroke="#162513" stroke-width="0.6" fill="none" opacity="0.5" />
+    <path d="M 284 168 Q 282 178, 282 188" stroke="#162513" stroke-width="0.6" fill="none" opacity="0.5" />
+
+    <!-- Berries scattered -->
+    <circle cx="216" cy="138" r="2" fill="#962a2a" opacity="0.85" />
+    <circle cx="220" cy="144" r="1.4" fill="#962a2a" opacity="0.7" />
+    <circle cx="264" cy="138" r="2" fill="#962a2a" opacity="0.85" />
+    <circle cx="240" cy="120" r="1.6" fill="#c98f2a" opacity="0.85" />
+    <circle cx="200" cy="172" r="1.4" fill="#c98f2a" opacity="0.7" />
+    <circle cx="280" cy="172" r="1.4" fill="#c98f2a" opacity="0.7" />
+
+    <!-- Brim shadow over the upper face — fades just above the smile -->
     <path
-      d="M 168 192 C 190 184, 240 180, 290 184 C 304 188, 308 196, 296 198 C 240 192, 200 196, 174 198 C 168 196, 168 194, 168 192 Z"
-      fill="#3d5b30"
-      opacity="0.55"
-    />
-    <!-- Lower foliage just above brim -->
-    <path
-      d="M 168 188
-         C 176 156, 208 130, 240 134
-         C 272 130, 304 156, 312 188
-         C 300 192, 274 184, 240 184
-         C 206 184, 180 192, 168 188 Z"
-      fill="#3d5b30"
-    />
-    <!-- Mid foliage -->
-    <path
-      d="M 184 162
-         C 192 134, 218 112, 240 120
-         C 262 112, 288 134, 296 162
-         C 282 168, 262 158, 240 158
-         C 218 158, 198 168, 184 162 Z"
-      fill="#4f6c3a"
-    />
-    <!-- Top crest -->
-    <path
-      d="M 206 134
-         C 212 104, 230 90, 240 102
-         C 250 90, 268 104, 274 134
-         C 264 138, 250 128, 240 128
-         C 230 128, 216 138, 206 134 Z"
-      fill="#5d7a4a"
-    />
-    <!-- Individual leaf accents -->
-    <path d="M 192 150 C 184 138, 192 122, 204 130 C 206 142, 200 154, 192 150 Z" fill="#3d5b30" />
-    <path d="M 218 124 C 212 102, 230 92, 234 112 C 232 126, 226 130, 218 124 Z" fill="#7aa36a" />
-    <path d="M 262 124 C 268 102, 250 92, 246 112 C 248 126, 254 130, 262 124 Z" fill="#7aa36a" />
-    <path d="M 288 150 C 296 138, 288 122, 276 130 C 274 142, 280 154, 288 150 Z" fill="#3d5b30" />
-    <!-- Leaf veins -->
-    <path d="M 226 110 Q 226 126, 228 142" stroke="#243d1d" stroke-width="0.8" fill="none" opacity="0.6" />
-    <path d="M 254 110 Q 254 126, 252 142" stroke="#243d1d" stroke-width="0.8" fill="none" opacity="0.6" />
-    <!-- Top sprig -->
-    <path d="M 246 102 C 240 80, 252 66, 254 84 C 252 96, 250 104, 246 102 Z" fill="#4f6c3a" />
-    <path d="M 252 80 Q 260 56, 266 44" stroke="#3d5b30" stroke-width="1.6" fill="none" stroke-linecap="round" />
-    <path d="M 266 44 C 262 38, 270 32, 273 40 C 272 48, 268 50, 266 44 Z" fill="#5d7a4a" />
-    <!-- Berries -->
-    <circle cx="218" cy="140" r="2" fill="#962a2a" opacity="0.85" />
-    <circle cx="222" cy="146" r="1.4" fill="#962a2a" opacity="0.7" />
-    <circle cx="262" cy="140" r="2" fill="#962a2a" opacity="0.85" />
-    <circle cx="240" cy="124" r="1.6" fill="#c98f2a" opacity="0.8" />
-    <!-- Brim shadow over face — fades down past the smile so just the smile peeks out -->
-    <path
-      d="M 178 200
-         C 200 214, 280 214, 302 200
-         L 302 222
-         C 280 218, 200 218, 178 222 Z"
+      d="M 178 210
+         C 200 220, 280 220, 302 210
+         L 302 224
+         C 280 220, 200 220, 178 224 Z"
       fill="url(#m-brim-shadow)"
     />
   </g>
 
-  <!-- Smile — just a soft kind curve, the only feature visible under the brim -->
-  <path d="M 230 218 Q 240 224, 250 218" stroke="#2a1810" stroke-width="1.6" fill="none" stroke-linecap="round" />
-  <!-- Tiny moustache leaf wisps flanking the smile -->
-  <path d="M 230 215 Q 222 219, 218 217 Q 222 213, 230 215 Z" fill="#3d5b30" opacity="0.85" />
-  <path d="M 250 215 Q 258 219, 262 217 Q 258 213, 250 215 Z" fill="#3d5b30" opacity="0.85" />
+  <!-- Smile — the only feature peeking under the brim -->
+  <path d="M 230 222 Q 240 228, 250 222" stroke="#2a1810" stroke-width="1.6" fill="none" stroke-linecap="round" />
 
   <!-- Staff -->
   <g>
@@ -286,7 +227,6 @@
     <rect x="167" y="318" width="14" height="2" rx="1" fill="#3a2618" />
     <rect x="172" y="500" width="10" height="3" rx="1" fill="#3a2618" />
 
-    <!-- Crystal-leaf crown -->
     <g transform="translate(170 70)">
       <circle cx="0" cy="0" r="46" fill="url(#m-glow)" />
       <path d="M -3 -10 C -16 -16, -26 -32, -22 -46 C -12 -40, -4 -22, -3 -10 Z" fill="#3d5b30" />
@@ -298,7 +238,6 @@
       <path d="M -5 16 L 0 -2 L 5 16 Z" fill="#a87a22" opacity="0.5" />
     </g>
 
-    <!-- Hand grip -->
     <ellipse cx="175" cy="372" rx="12" ry="14" fill="#1a1208" />
     <path d="M 168 366 Q 175 360, 184 364" stroke="#3a2618" stroke-width="1.2" fill="none" />
   </g>
@@ -307,7 +246,6 @@
   <g
     style="transform: rotate({shoulderDeg}deg); transform-origin: {PIVOT_X}px {PIVOT_Y}px; transform-box: view-box; transition: transform 200ms cubic-bezier(0.22, 0.8, 0.2, 1);"
   >
-    <!-- Upper arm (shoulder → elbow) -->
     <path
       d="M 295 240
          C 320 236, 360 240, 395 246
@@ -316,14 +254,11 @@
       fill="url(#m-cloak-arm)"
     />
     <path d="M 305 248 C 340 250, 375 252, 392 254" stroke="#070d09" stroke-width="1" opacity="0.5" fill="none" />
-    <!-- Elbow shadow -->
     <ellipse cx="395" cy="253" rx="11" ry="9" fill="#070d09" opacity="0.55" />
 
-    <!-- Forearm group (rotates around the elbow) -->
     <g
       style="transform: rotate({forearmDeg}deg); transform-origin: 395px 253px; transform-box: view-box; transition: transform 200ms cubic-bezier(0.22, 0.8, 0.2, 1);"
     >
-      <!-- Forearm sleeve -->
       <path
         d="M 392 246
            C 420 246, 470 250, 502 252
@@ -332,14 +267,11 @@
         fill="url(#m-cloak-arm)"
       />
       <path d="M 400 254 C 440 255, 480 256, 500 256" stroke="#070d09" stroke-width="1" opacity="0.45" fill="none" />
-      <!-- Cuff -->
       <path d="M 498 248 C 512 250, 516 258, 508 262 L 498 262 Z" fill="#0b1610" />
 
-      <!-- Hand -->
       <ellipse cx="513" cy="255" rx="9" ry="6.5" fill="#c4b48b" />
       <path d="M 508 251 Q 514 248, 520 251" stroke="#7a6a48" stroke-width="0.6" fill="none" opacity="0.6" />
 
-      <!-- Wand (untouched) -->
       <g transform="translate(519 255)">
         <path d="M 0 0 C 30 -3, 60 -6, 92 -10" stroke="#5a3d2b" stroke-width="2.8" fill="none" stroke-linecap="round" />
         <path d="M 0 0 C 30 -3, 60 -6, 92 -10" stroke="#7a5638" stroke-width="0.8" fill="none" stroke-linecap="round" opacity="0.8" />
