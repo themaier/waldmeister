@@ -1,17 +1,14 @@
-import { redirect } from '@sveltejs/kit';
 import type { PageServerLoad } from './$types';
 import { db } from '$lib/server/db';
 import { forestPlots, parcels, forestPlotParcels, trees, accessRoutes } from '$lib/server/db/schema';
 import { geomToGeoJson } from '$lib/server/db/geo';
 import { eq, sql, inArray } from 'drizzle-orm';
 
-export const load: PageServerLoad = async ({ locals }) => {
-  if (!locals.user) throw redirect(303, '/login');
-
+export const load: PageServerLoad = async ({ locals, url }) => {
   const plots = await db
     .select({ id: forestPlots.id, name: forestPlots.name, createdAt: forestPlots.createdAt })
     .from(forestPlots)
-    .where(eq(forestPlots.ownerId, locals.user.id))
+    .where(eq(forestPlots.ownerId, locals.user!.id))
     .orderBy(forestPlots.createdAt);
 
   const plotIds = plots.map((p) => p.id);
@@ -58,6 +55,13 @@ export const load: PageServerLoad = async ({ locals }) => {
   const treesByPlot = Object.fromEntries(treeCounts.map((r) => [r.plotId, r.count]));
   const routesByPlot = Object.fromEntries(routeCounts.map((r) => [r.plotId, r.count]));
 
+  // Honour `?plot=ID` from the Waldstück-creation redirect. Reading
+  // searchParams here gives per-param reactivity (load reruns only when
+  // `plot` actually changes) and avoids a client-side $effect.
+  const requested = url.searchParams.get('plot');
+  const requestedPlotId =
+    requested && plots.some((p) => p.id === requested) ? requested : null;
+
   return {
     plots: plots.map((p) => ({
       ...p,
@@ -69,6 +73,7 @@ export const load: PageServerLoad = async ({ locals }) => {
       plotId: row.plotId,
       cadastralId: row.cadastralId,
       geometry: typeof row.geometry === 'string' ? JSON.parse(row.geometry) : row.geometry
-    }))
+    })),
+    requestedPlotId
   };
 };

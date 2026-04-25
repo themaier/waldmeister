@@ -1,4 +1,4 @@
-import { error, redirect } from '@sveltejs/kit';
+import { error } from '@sveltejs/kit';
 import type { PageServerLoad } from './$types';
 import { db } from '$lib/server/db';
 import { workOrders, workOrderTrees, trees } from '$lib/server/db/schema';
@@ -7,12 +7,10 @@ import { suggestPriority } from '$lib/priority';
 import type { Priority } from '$lib/enums';
 
 export const load: PageServerLoad = async ({ locals, params, url }) => {
-  if (!locals.user) throw redirect(303, '/login');
-
   const [order] = await db
     .select()
     .from(workOrders)
-    .where(and(eq(workOrders.id, params.id), eq(workOrders.ownerId, locals.user.id)))
+    .where(and(eq(workOrders.id, params.id), eq(workOrders.ownerId, locals.user!.id)))
     .limit(1);
   if (!order) throw error(404, 'Auftrag nicht gefunden.');
 

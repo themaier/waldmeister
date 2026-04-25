@@ -1,4 +1,4 @@
-import type { Handle } from '@sveltejs/kit';
+import { redirect, type Handle } from '@sveltejs/kit';
 import { building } from '$app/environment';
 import { auth } from '$lib/server/auth';
 import { ensureDefaultPlotForUser } from '$lib/server/default-plot';
@@ -34,6 +34,16 @@ export const handle: Handle = async ({ event, resolve }) => {
   } else {
     event.locals.user = null;
     event.locals.session = null;
+  }
+
+  const path = event.url.pathname;
+  const isPublic =
+    path === '/login' ||
+    path === '/register' ||
+    path.startsWith('/api/auth') ||
+    path.startsWith('/a/');
+  if (!event.locals.user && !isPublic) {
+    throw redirect(303, '/login');
   }
 
   return resolve(event);

@@ -1,6 +1,6 @@
 <script lang="ts">
   import { authClient } from '$lib/auth-client';
-  import { goto } from '$app/navigation';
+  import { goto, invalidateAll } from '$app/navigation';
   import { Tree, ArrowRight } from 'phosphor-svelte';
 
   let name = $state('');
@@ -18,6 +18,7 @@
       if (res.error) {
         error = res.error.message ?? 'Registrierung fehlgeschlagen.';
       } else {
+        await invalidateAll();
         await goto('/');
       }
     } catch (err) {
