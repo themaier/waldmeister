@@ -89,10 +89,6 @@
       <stop offset="35%" stop-color="#d4a23c" stop-opacity="0.7" />
       <stop offset="100%" stop-color="#d4a23c" stop-opacity="0" />
     </radialGradient>
-    <linearGradient id="m-brim-shadow" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0%" stop-color="rgba(7,13,9,0.85)" />
-      <stop offset="100%" stop-color="rgba(7,13,9,0)" />
-    </linearGradient>
     <filter id="m-soft" x="-50%" y="-50%" width="200%" height="200%">
       <feGaussianBlur stdDeviation="9" />
     </filter>
@@ -101,7 +97,7 @@
   <!-- Ground shadow -->
   <ellipse cx="240" cy="780" rx="170" ry="11" fill="#000" opacity="0.5" filter="url(#m-soft)" />
 
-  <!-- Cloak — egg-rounded shoulders at the top, original jagged hem at the bottom. -->
+  <!-- Cloak — rounded dome top, egg-rounded shoulders, jagged hem at the bottom. -->
   <path
     d="M 194 210
        C 186 222, 168 236, 148 252
@@ -118,7 +114,8 @@
        L 332 372
        C 330 332, 336 290, 332 252
        C 312 236, 294 222, 286 210
-       L 194 210 Z"
+       C 286 188, 252 178, 240 178
+       C 228 178, 194 188, 194 210 Z"
     fill="url(#m-cloak)"
   />
 
@@ -131,8 +128,13 @@
 
   <!-- Head — ellipse covering the cloak's top closure entirely -->
   <ellipse cx="240" cy="210" rx="46" ry="42" fill="url(#m-skin)" />
-  <ellipse cx="222" cy="232" rx="6" ry="4" fill="#d6b88a" opacity="0.18" />
-  <ellipse cx="258" cy="232" rx="6" ry="4" fill="#d6b88a" opacity="0.18" />
+  <!-- Darker shading on top of head, blended downward -->
+  <path
+    d="M 194 210 A 46 42 0 0 1 286 210 Z"
+    fill="#2a1a0d"
+    opacity="0.55"
+  />
+  <ellipse cx="240" cy="186" rx="40" ry="14" fill="#1a0e06" opacity="0.45" />
 
   <!-- Hat -->
   <g>
@@ -209,14 +211,33 @@
     <circle cx="240" cy="158" r="1.4" fill="#c98f2a" opacity="0.85" />
     <circle cx="240" cy="134" r="1.2" fill="#c98f2a" opacity="0.7" />
 
-    <!-- Brim shadow over the upper face — fades just above the smile -->
-    <path
-      d="M 196 222
-         C 218 214, 262 214, 284 222
-         L 284 238
-         C 262 232, 218 232, 196 238 Z"
-      fill="url(#m-brim-shadow)"
-    />
+    <!-- Leaves trailing along the hat dome outline -->
+    <g>
+      <!-- Left side, base to mid -->
+      <path d="M 168 210 C 156 214, 150 222, 158 226 C 168 226, 174 218, 168 210 Z" fill="#3d5b30" />
+      <path d="M 174 196 C 162 198, 158 208, 168 210 C 178 208, 180 200, 174 196 Z" fill="#4f6c3a" />
+      <path d="M 184 178 C 172 180, 170 192, 180 194 C 190 192, 192 184, 184 178 Z" fill="#5d7a4a" />
+      <path d="M 196 158 C 184 160, 184 172, 194 174 C 204 170, 204 162, 196 158 Z" fill="#3d5b30" />
+      <path d="M 208 138 C 196 138, 196 152, 206 154 C 216 152, 216 142, 208 138 Z" fill="#4f6c3a" />
+      <path d="M 220 118 C 210 118, 212 130, 220 132 C 228 130, 228 120, 220 118 Z" fill="#5d7a4a" />
+
+      <!-- Apex cluster -->
+      <path d="M 232 102 C 224 100, 224 110, 232 112 C 240 110, 240 102, 232 102 Z" fill="#7aa36a" />
+      <path d="M 248 102 C 256 100, 256 110, 248 112 C 240 110, 240 102, 248 102 Z" fill="#7aa36a" />
+
+      <!-- Right side, apex back down to base -->
+      <path d="M 260 118 C 270 118, 268 130, 260 132 C 252 130, 252 120, 260 118 Z" fill="#5d7a4a" />
+      <path d="M 272 138 C 284 138, 284 152, 274 154 C 264 152, 264 142, 272 138 Z" fill="#4f6c3a" />
+      <path d="M 284 158 C 296 160, 296 172, 286 174 C 276 170, 276 162, 284 158 Z" fill="#3d5b30" />
+      <path d="M 296 178 C 308 180, 310 192, 300 194 C 290 192, 288 184, 296 178 Z" fill="#5d7a4a" />
+      <path d="M 306 196 C 318 198, 322 208, 312 210 C 302 208, 300 200, 306 196 Z" fill="#4f6c3a" />
+      <path d="M 312 210 C 324 214, 330 222, 322 226 C 312 226, 306 218, 312 210 Z" fill="#3d5b30" />
+
+      <!-- Tiny berries along the rim -->
+      <circle cx="178" cy="206" r="1.4" fill="#962a2a" opacity="0.85" />
+      <circle cx="302" cy="206" r="1.4" fill="#962a2a" opacity="0.85" />
+      <circle cx="240" cy="108" r="1.2" fill="#c98f2a" opacity="0.85" />
+    </g>
   </g>
 
   <!-- Smile — only feature visible under the brim -->

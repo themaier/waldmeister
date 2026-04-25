@@ -45,7 +45,6 @@ export async function tracePolygonAt(lng: number, lat: number): Promise<Pt[]> {
     } catch (e) {
       lastErr = e;
       if (e instanceof ParcelTooLargeError) {
-        console.log('[trace] radius', radius, 'too small, retrying larger');
         continue;
       }
       throw e;
@@ -78,18 +77,6 @@ async function traceOnce(lng: number, lat: number, ZOOM: number, RADIUS: number)
     }
   }
   await Promise.all(jobs);
-  console.log(
-    '[trace] zoom',
-    ZOOM,
-    'radius',
-    RADIUS,
-    'tiles fetched',
-    stats.fetched,
-    'failed',
-    stats.failed,
-    'linePx',
-    stats.linePixels
-  );
 
   if (stats.linePixels === 0) {
     throw new Error('Keine Parzellengrenzen im Tile-Bereich gefunden (Tiles leer?).');
@@ -101,18 +88,13 @@ async function traceOnce(lng: number, lat: number, ZOOM: number, RADIUS: number)
   const LINE_DILATE = 2;
   const rawLineMask = new Uint8Array(lineMask);
   dilate(lineMask, SIZE, SIZE, LINE_DILATE);
-  let dilatedPx = 0;
-  for (let i = 0; i < lineMask.length; i++) if (lineMask[i]) dilatedPx++;
-  console.log('[trace] dilated linePx', dilatedPx);
 
   const clickPx = {
     x: Math.round((center.x - minTx) * TILE),
     y: Math.round((center.y - minTy) * TILE)
   };
-  console.log('[trace] clickPx', clickPx);
   const seed = findFreePixel(lineMask, SIZE, SIZE, clickPx.x, clickPx.y, 40);
   if (!seed) throw new Error('Keine freie Fläche in der Nähe des Klicks gefunden.');
-  console.log('[trace] seed', seed);
 
   const fill = floodFill(lineMask, SIZE, SIZE, seed.x, seed.y);
   if (!fill) {
@@ -120,12 +102,7 @@ async function traceOnce(lng: number, lat: number, ZOOM: number, RADIUS: number)
       'Parzellengrenze nicht vollständig im sichtbaren Bereich — größere Umgebung wird versucht.'
     );
   }
-  let fillPx = 0;
-  for (let i = 0; i < fill.length; i++) if (fill[i]) fillPx++;
-  console.log('[trace] fillPx', fillPx);
-
   const contour = mooreTrace(fill, SIZE, SIZE);
-  console.log('[trace] contour length', contour.length);
   if (contour.length < 8) throw new Error('Parzelle zu klein oder Erkennung fehlgeschlagen.');
 
   // Project each contour pixel outward along its local normal until it
@@ -140,7 +117,6 @@ async function traceOnce(lng: number, lat: number, ZOOM: number, RADIUS: number)
   const snapped = snapOutward(contour, snapMask, SIZE, SIZE, 12);
 
   const simplified = douglasPeucker(snapped, 2.5);
-  console.log('[trace] simplified length', simplified.length);
   if (simplified.length < 3) throw new Error('Zu wenige Eckpunkte erkannt.');
 
   const ring: Pt[] = simplified.map(([px, py]) => {
@@ -164,23 +140,20 @@ async function fetchTileToMask(
   let res: Response;
   try {
     res = await fetch(url);
-  } catch (e) {
+  } catch {
     stats.failed++;
-    console.warn('[trace] fetch failed', url, e);
     return;
   }
   if (!res.ok) {
     stats.failed++;
-    console.warn('[trace] fetch not ok', url, res.status);
     return;
   }
   const buf = Buffer.from(await res.arrayBuffer());
   let png: PNG;
   try {
     png = PNG.sync.read(buf);
-  } catch (e) {
+  } catch {
     stats.failed++;
-    console.warn('[trace] PNG decode failed', url, (e as Error).message);
     return;
   }
   stats.fetched++;

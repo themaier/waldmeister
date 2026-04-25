@@ -93,6 +93,30 @@
   let cameraInputEl = $state<HTMLInputElement | null>(null);
   let mapRef = $state<{ instance: () => maplibregl.Map | null } | null>(null);
   let marker = $state<maplibregl.Marker | null>(null);
+  let uncertaintyLayerReady = $state(false);
+
+  const UNCERTAINTY_SOURCE_ID = 'gps-uncertainty';
+  const UNCERTAINTY_FILL_LAYER_ID = 'gps-uncertainty-fill';
+  const UNCERTAINTY_OUTLINE_LAYER_ID = 'gps-uncertainty-outline';
+
+  function geodesicCirclePolygon(lng: number, lat: number, radiusM: number, points = 64) {
+    const earth = 6378137;
+    const coords: [number, number][] = [];
+    const latRad = (lat * Math.PI) / 180;
+    for (let i = 0; i <= points; i++) {
+      const angle = (i / points) * 2 * Math.PI;
+      const dx = radiusM * Math.cos(angle);
+      const dy = radiusM * Math.sin(angle);
+      const dLat = (dy / earth) * (180 / Math.PI);
+      const dLng = (dx / (earth * Math.cos(latRad))) * (180 / Math.PI);
+      coords.push([lng + dLng, lat + dLat]);
+    }
+    return {
+      type: 'Feature' as const,
+      geometry: { type: 'Polygon' as const, coordinates: [coords] },
+      properties: {}
+    };
+  }
 
   const lowAccuracy = $derived(gpsAccuracyM !== null && gpsAccuracyM > 10);
   const gpsRefining = $derived(gpsCapturing && !gpsFirstFixPending);
@@ -329,6 +353,63 @@
       });
     }
 
+    const ensureUncertaintyLayer = () => {
+      if (uncertaintyLayerReady || !map.isStyleLoaded()) return;
+      if (!map.getSource(UNCERTAINTY_SOURCE_ID)) {
+        map.addSource(UNCERTAINTY_SOURCE_ID, {
+          type: 'geojson',
+          data: { type: 'FeatureCollection', features: [] }
+        });
+        map.addLayer({
+          id: UNCERTAINTY_FILL_LAYER_ID,
+          type: 'fill',
+          source: UNCERTAINTY_SOURCE_ID,
+          paint: {
+            'fill-color': '#0f4c2c',
+            'fill-opacity': 0.15
+          }
+        });
+        map.addLayer({
+          id: UNCERTAINTY_OUTLINE_LAYER_ID,
+          type: 'line',
+          source: UNCERTAINTY_SOURCE_ID,
+          paint: {
+            'line-color': '#0f4c2c',
+            'line-width': 1.5,
+            'line-opacity': 0.6
+          }
+        });
+      }
+      uncertaintyLayerReady = true;
+    };
+
+    const updateUncertainty = () => {
+      const src = map.getSource(UNCERTAINTY_SOURCE_ID) as maplibregl.GeoJSONSource | undefined;
+      if (!src) return;
+      if (latitude !== null && longitude !== null && gpsAccuracyM !== null && gpsAccuracyM > 0) {
+        src.setData({
+          type: 'FeatureCollection',
+          features: [geodesicCirclePolygon(longitude, latitude, gpsAccuracyM)]
+        });
+      } else {
+        src.setData({ type: 'FeatureCollection', features: [] });
+      }
+    };
+
+    if (!uncertaintyLayerReady) {
+      if (map.isStyleLoaded()) {
+        ensureUncertaintyLayer();
+        updateUncertainty();
+      } else {
+        map.once('load', () => {
+          ensureUncertaintyLayer();
+          updateUncertainty();
+        });
+      }
+    } else {
+      updateUncertainty();
+    }
+
     if (latitude !== null && longitude !== null) {
       marker.setLngLat([longitude, latitude]);
       // Auto mode: keep the current position centered (manual mode should not fight the user).
@@ -395,48 +476,30 @@
 
     <!-- GPS -->
     <section class="paper px-5 py-5 flex flex-col gap-3">
-      <div class="flex items-start justify-between gap-3">
-        <div class="flex-1">
-          <h2
-            class="font-serif font-medium text-[1.0625rem] tracking-tight text-ink m-0 section-numeral mb-2"
-            data-num="01"
-            style="font-variation-settings: 'opsz' 96, 'SOFT' 40, 'WONK' 1;"
-          >
-            Position
-          </h2>
-          {#if gpsCapturing && gpsFirstFixPending}
-            <div class="inline-flex items-center gap-2 px-3 py-2 mb-3 rounded-btn border bg-earth text-sm font-semibold text-content-muted">
-              <span class="spinner" aria-hidden="true"></span>
-              GPS wird ermittelt …
-            </div>
-          {/if}
-          {#if latitude !== null && longitude !== null}
-            <div class="inline-flex items-center gap-2 px-3 py-2 rounded-btn border border-dashed bg-earth font-mono text-[0.8125rem] text-content">
-              <MapPin size="0.875em" weight="bold" />
-              <span>{latitude.toFixed(6)}</span>
-              <span class="text-content-faint">·</span>
-              <span>{longitude.toFixed(6)}</span>
-            </div>
-            {#if gpsMode !== 'manual'}
-              <p class="text-xs text-content-muted mt-2">
-                Genauigkeit:
-                {#if gpsAccuracyM === null}
-                  wird ermittelt
-                {:else}
-                  ±{gpsAccuracyM.toFixed(1)} m
-                {/if}
-                {#if gpsRefining}
-                  <span class="inline-flex items-center gap-1 ml-1 text-content-faint">
-                    <span class="spinner spinner-xs" aria-hidden="true"></span>
-                    <span>wird verfeinert</span>
-                  </span>
-                {/if}
-              </p>
-            {/if}
-          {:else}
-            <p class="text-sm text-content-muted">Keine Koordinaten.</p>
-          {/if}
+      <h2
+        class="font-serif font-medium text-[1.0625rem] tracking-tight text-ink m-0 section-numeral"
+        data-num="01"
+        style="font-variation-settings: 'opsz' 96, 'SOFT' 40, 'WONK' 1;"
+      >
+        Position
+      </h2>
+      {#if gpsCapturing && gpsFirstFixPending}
+        <div class="inline-flex items-center gap-2 px-3 py-2 rounded-btn border bg-earth text-sm font-semibold text-content-muted self-start">
+          <span class="spinner" aria-hidden="true"></span>
+          GPS wird ermittelt …
         </div>
+      {/if}
+      <div class="flex items-center justify-between gap-3 flex-wrap">
+        {#if latitude !== null && longitude !== null}
+          <div class="inline-flex items-center gap-2 px-3 py-2 min-h-[40px] rounded-btn border border-dashed bg-earth font-mono text-[0.8125rem] text-content">
+            <MapPin size="0.875em" weight="bold" />
+            <span>{latitude.toFixed(6)}</span>
+            <span class="text-content-faint">·</span>
+            <span>{longitude.toFixed(6)}</span>
+          </div>
+        {:else}
+          <p class="text-sm text-content-muted m-0">Keine Koordinaten.</p>
+        {/if}
         <button
           class="inline-flex items-center gap-2 px-3 py-2 min-h-[40px] rounded-btn bg-earth border text-ink text-sm font-semibold hover:border-pine transition"
           onclick={retakeGps}
@@ -444,6 +507,22 @@
           <Crosshair size="1em" /> {gpsMode === 'manual' ? 'GPS verwenden' : 'Erneut'}
         </button>
       </div>
+      {#if latitude !== null && longitude !== null && gpsMode !== 'manual'}
+        <p class="text-xs text-content-muted m-0">
+          Genauigkeit:
+          {#if gpsAccuracyM === null}
+            wird ermittelt
+          {:else}
+            ±{gpsAccuracyM.toFixed(1)} m
+          {/if}
+          {#if gpsRefining}
+            <span class="inline-flex items-center gap-1 ml-1 text-content-faint">
+              <span class="spinner spinner-xs" aria-hidden="true"></span>
+              <span>wird verfeinert</span>
+            </span>
+          {/if}
+        </p>
+      {/if}
 
       <div class="rounded-btn overflow-hidden border bg-surface-muted h-[220px] w-full">
         <Map
