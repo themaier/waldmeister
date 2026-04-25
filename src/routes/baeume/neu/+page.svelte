@@ -88,7 +88,6 @@
   let gpsRefineLastImprovedAt = $state<number | null>(null);
   let gpsWatchId = $state<number | null>(null);
   let gpsRefineStopTimer = $state<number | null>(null);
-  let gpsAutoStarted = $state(false);
   let gpsZoomBoostApplied = $state(false);
   let cameraInputEl = $state<HTMLInputElement | null>(null);
   let mapRef = $state<{ instance: () => maplibregl.Map | null } | null>(null);
@@ -421,14 +420,10 @@
     }
   });
 
-  // Auto-start GPS once if the user arrived without coordinates.
-  $effect(() => {
-    if (gpsAutoStarted) return;
-    if (!gpsFirstFixPending) return;
-    if (gpsCapturing) return;
-    gpsAutoStarted = true;
-    retakeGps();
-  });
+  // NOTE: we deliberately do NOT auto-start GPS on mount. iOS Safari only
+  // shows the geolocation prompt when the call originates from a user-gesture
+  // handler — an effect-driven call is silently auto-denied. The user taps
+  // the "GPS holen" button (or Speichern, which falls back to retakeGps()).
 
   // Cleanup any active geolocation watch when navigating away.
   $effect(() => {
@@ -504,7 +499,14 @@
           class="inline-flex items-center gap-2 px-3 py-2 min-h-[40px] rounded-btn bg-earth border text-ink text-sm font-semibold hover:border-pine transition"
           onclick={retakeGps}
         >
-          <Crosshair size="1em" /> {gpsMode === 'manual' ? 'GPS verwenden' : 'Erneut'}
+          <Crosshair size="1em" />
+          {#if latitude === null || longitude === null}
+            GPS holen
+          {:else if gpsMode === 'manual'}
+            GPS verwenden
+          {:else}
+            Erneut
+          {/if}
         </button>
       </div>
       {#if latitude !== null && longitude !== null && gpsMode !== 'manual'}

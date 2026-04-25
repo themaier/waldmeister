@@ -1002,21 +1002,40 @@
     if (activePlotId) await loadActivePlotLayers(activePlotId);
   }
 
-  async function addTreeAtCurrentGps() {
+  let addingTreeGps = $state(false);
+
+  function addTreeAtCurrentGps() {
     if (!activePlotId) return;
     if (!("geolocation" in navigator)) {
       alert("GPS nicht verfügbar.");
       return;
     }
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
+    if (addingTreeGps) return;
+    // IMPORTANT: call getBetterGpsFix synchronously inside the click handler
+    // (no `await` before it) so iOS Safari preserves the user-gesture
+    // activation that geolocation needs. See src/lib/gps.ts comment.
+    addingTreeGps = true;
+    const plotId = activePlotId;
+    getBetterGpsFix({
+      minWaitMs: 0,
+      maxWaitMs: 10_000,
+      desiredAccuracyM: 15,
+      maximumAgeMs: 30_000,
+    })
+      .then((fix) => {
+        if (!fix) {
+          alert(
+            "GPS konnte nicht ermittelt werden. Bitte Standortdienste für diese Seite erlauben und es draußen erneut versuchen."
+          );
+          return;
+        }
         goto(
-          `/baeume/neu?plot=${activePlotId}&lat=${pos.coords.latitude}&lng=${pos.coords.longitude}&acc=${pos.coords.accuracy}`
+          `/baeume/neu?plot=${plotId}&lat=${fix.lat}&lng=${fix.lng}&acc=${fix.acc}`
         );
-      },
-      (err) => alert(`GPS-Fehler: ${err.message}`),
-      { enableHighAccuracy: true, timeout: 10_000 }
-    );
+      })
+      .finally(() => {
+        addingTreeGps = false;
+      });
   }
 
   // After Map mounts, grab the maplibre instance and wire layers.
@@ -1045,7 +1064,7 @@
   });
 </script>
 
-<div class="home-shell">
+<div class="home-shell" class:home-shell--empty={data.plots.length === 0}>
   <PlotSwitcher
     plots={data.plots}
     activeId={activePlotId}
@@ -1091,11 +1110,12 @@
           </button>
         {:else}
           <button
-            class="grid place-items-center w-14 h-14 rounded-full text-earth border shadow-canopy transition hover:-translate-y-px active:translate-y-0"
+            class="grid place-items-center w-14 h-14 rounded-full text-earth border shadow-canopy transition hover:-translate-y-px active:translate-y-0 disabled:opacity-70 disabled:cursor-progress"
             style="background: linear-gradient(180deg, var(--color-pine), var(--color-pine-deep)); border-color: var(--color-pine-deep); box-shadow: var(--shadow-canopy), inset 0 1px 0 rgba(255,255,255,0.08);"
             onclick={addTreeAtCurrentGps}
-            aria-label="Baum hier fotografieren"
-            title="Baum hier fotografieren"
+            disabled={addingTreeGps}
+            aria-label={addingTreeGps ? "GPS wird ermittelt …" : "Baum hier fotografieren"}
+            title={addingTreeGps ? "GPS wird ermittelt …" : "Baum hier fotografieren"}
           >
             <span class="relative grid place-items-center">
               <TreeEvergreen size="1.75em" weight="fill" />

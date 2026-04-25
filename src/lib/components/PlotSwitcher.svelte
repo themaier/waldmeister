@@ -15,7 +15,8 @@
     SignOut,
     Tree,
     Crosshair,
-    ClipboardText
+    ClipboardText,
+    List
   } from 'phosphor-svelte';
   import { authClient } from '$lib/auth-client';
   import { goto } from '$app/navigation';
@@ -49,9 +50,6 @@
   );
   // Baum creation needs a plot context — disable when there isn't one.
   const baumHref = $derived(activeId ? `/baeume/neu?plot=${activeId}` : null);
-  const initial = $derived(
-    (userName || '').trim().slice(0, 1).toUpperCase() || 'W'
-  );
   const fromHref = $derived.by(() => `${page.url.pathname}${page.url.search}`);
 
   function prev() {
@@ -74,10 +72,60 @@
   class="sticky top-0 z-20 bg-surface/85 border-b backdrop-blur-md backdrop-saturate-150"
   style="padding-top: env(safe-area-inset-top);"
 >
-  <div class="flex items-center gap-1 px-2 sm:px-3 py-2">
+  <div class="flex items-center gap-2 px-2 sm:px-3 py-2">
+    <!-- Account / menu -->
+    <div class="dropdown flex-shrink-0">
+      <button
+        tabindex="0"
+        class="w-11 h-11 grid place-items-center rounded-btn bg-surface border text-ink hover:border-pine transition"
+        aria-label="Konto"
+      >
+        <List size="1.25em" weight="bold" />
+      </button>
+      <ul
+        role="menu"
+        tabindex="0"
+        class="dropdown-content mt-2 p-2 min-w-[220px] rounded-box bg-surface border shadow-canopy z-30 list-none flex flex-col gap-1"
+      >
+        <li
+          class="px-3 pt-2 pb-3 flex flex-col gap-[2px] border-b border-hairline mb-1 select-none"
+        >
+          <span class="eyebrow">Angemeldet</span>
+          <span
+            class="font-serif font-medium text-[0.9375rem] text-ink truncate"
+            >{userName || 'Konto'}</span
+          >
+        </li>
+        <li>
+          <a
+            href="/auftraege"
+            role="menuitem"
+            class="account-item flex items-center gap-2 px-3 py-2.5 rounded-btn text-sm text-content no-underline transition w-full"
+          >
+            <ClipboardText size="1.1em" /> Aufträge
+          </a>
+        </li>
+        <li class="mt-2 pt-2 border-t border-hairline">
+          <button
+            type="button"
+            onclick={logout}
+            role="menuitem"
+            class="account-item account-item-danger flex items-center gap-2 px-3 py-2.5 rounded-btn text-sm text-content w-full transition"
+          >
+            <SignOut size="1.1em" /> Abmelden
+          </button>
+        </li>
+      </ul>
+    </div>
+
+    <span
+      class="self-stretch w-px bg-hairline my-1"
+      aria-hidden="true"
+    ></span>
+
     <!-- Plot navigator -->
     <button
-      class="w-11 h-11 grid place-items-center rounded-btn text-content-muted hover:text-ink hover:bg-surface-muted border border-transparent transition disabled:opacity-30 disabled:cursor-not-allowed flex-shrink-0"
+      class="w-11 h-11 grid place-items-center rounded-btn bg-surface text-content-muted hover:text-ink hover:bg-surface-muted border transition disabled:opacity-30 disabled:cursor-not-allowed flex-shrink-0"
       onclick={prev}
       disabled={!hasMultiple}
       aria-label="Vorheriges Waldstück"
@@ -116,7 +164,7 @@
     </div>
 
     <button
-      class="w-11 h-11 grid place-items-center rounded-btn text-content-muted hover:text-ink hover:bg-surface-muted border border-transparent transition disabled:opacity-30 disabled:cursor-not-allowed flex-shrink-0"
+      class="w-11 h-11 grid place-items-center rounded-btn bg-surface text-content-muted hover:text-ink hover:bg-surface-muted border transition disabled:opacity-30 disabled:cursor-not-allowed flex-shrink-0"
       onclick={next}
       disabled={!hasMultiple}
       aria-label="Nächstes Waldstück"
@@ -125,7 +173,7 @@
     </button>
 
     <span
-      class="self-stretch w-px bg-hairline mx-1 sm:mx-1.5 my-1"
+      class="self-stretch w-px bg-hairline my-1"
       aria-hidden="true"
     ></span>
 
@@ -206,48 +254,6 @@
       </ul>
     </div>
 
-    <!-- Avatar — small extra breathing room away from the Plus. -->
-    <div class="dropdown dropdown-end flex-shrink-0 ml-2">
-      <button
-        tabindex="0"
-        class="w-11 h-11 rounded-full bg-surface border text-ink font-serif font-semibold text-[0.9375rem] grid place-items-center hover:border-pine transition"
-        style="font-variation-settings: 'opsz' 48, 'SOFT' 40, 'WONK' 1;"
-        aria-label="Konto"
-      >
-        <span>{initial}</span>
-      </button>
-      <ul
-        role="menu"
-        tabindex="0"
-        class="dropdown-content menu mt-2 p-2 min-w-[220px] rounded-box bg-surface border shadow-canopy z-30"
-      >
-        <li
-          class="px-3 pt-2 pb-3 flex flex-col gap-[2px] border-b border-hairline mb-2"
-        >
-          <span class="eyebrow">Angemeldet</span>
-          <span
-            class="font-serif font-medium text-[0.9375rem] text-ink truncate"
-            >{userName || 'Konto'}</span
-          >
-        </li>
-        <li>
-          <a
-            href="/auftraege"
-            class="flex items-center gap-2 text-sm text-content hover:bg-surface-muted hover:text-ink w-full"
-          >
-            <ClipboardText size="1.1em" /> Aufträge
-          </a>
-        </li>
-        <li>
-          <button
-            onclick={logout}
-            class="flex items-center gap-2 text-sm text-content hover:bg-surface-muted hover:text-crimson w-full"
-          >
-            <SignOut size="1.1em" /> Abmelden
-          </button>
-        </li>
-      </ul>
-    </div>
   </div>
 </header>
 
@@ -286,5 +292,22 @@
     opacity: 0.45;
     cursor: not-allowed;
     pointer-events: none;
+  }
+  .account-item {
+    cursor: pointer;
+    text-align: left;
+    background: transparent;
+    border: 0;
+    width: 100%;
+    box-sizing: border-box;
+    font: inherit;
+    color: var(--color-content);
+  }
+  .account-item:hover {
+    background: var(--color-surface-muted);
+    color: var(--color-ink);
+  }
+  .account-item-danger:hover {
+    color: var(--color-crimson);
   }
 </style>
