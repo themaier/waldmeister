@@ -14,9 +14,31 @@ function init() {
   const secret = env.BETTER_AUTH_SECRET;
   if (!secret) throw new Error('BETTER_AUTH_SECRET is not set');
 
+  const baseURL = env.BETTER_AUTH_URL ?? env.ORIGIN ?? 'http://localhost:3000';
+
+  // Better-auth rejects any POST whose Origin header is not in trustedOrigins
+  // (defaults to just `baseURL`). On the VPS this fails the moment the request
+  // arrives via www., a different scheme, or the operator forgot to set
+  // BETTER_AUTH_URL to the exact public origin. Include everything we can
+  // plausibly trust and the common dev URLs.
+  const domain = env.DOMAIN;
+  const trustedOrigins = Array.from(
+    new Set(
+      [
+        baseURL,
+        env.ORIGIN,
+        domain && `https://${domain}`,
+        domain && `https://www.${domain}`,
+        'http://localhost:3000',
+        'http://localhost:5173'
+      ].filter((v): v is string => Boolean(v))
+    )
+  );
+
   const opts: BetterAuthOptions = {
     secret,
-    baseURL: env.BETTER_AUTH_URL ?? 'http://localhost:3000',
+    baseURL,
+    trustedOrigins,
     database: drizzleAdapter(db, {
       provider: 'pg',
       schema: {
@@ -35,10 +57,6 @@ function init() {
     session: {
       expiresIn: 60 * 60 * 24 * 30,
       updateAge: 60 * 60 * 24
-    },
-    advanced: {
-      useSecureCookies: process.env.NODE_ENV === 'production' || env.NODE_ENV === 'production',
-      crossSubDomainCookies: { enabled: false }
     }
   };
 

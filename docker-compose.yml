@@ -30,6 +30,7 @@ services:
     environment:
       # Override for in-compose networking; `.env` supplies all secrets.
       DATABASE_URL: postgres://waldmeister:waldmeister@db:5432/waldmeister
+      DOMAIN: ${DOMAIN}
       ORIGIN: https://${DOMAIN}
       BETTER_AUTH_URL: https://${DOMAIN}
     expose:
