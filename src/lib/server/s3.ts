@@ -12,7 +12,6 @@ const bucket = env.S3_BUCKET;
 const accessKey = env.S3_ACCESS_KEY_ID;
 const secretKey = env.S3_SECRET_ACCESS_KEY;
 const forcePathStyle = env.S3_FORCE_PATH_STYLE === 'true';
-export const publicUrlBase = env.S3_PUBLIC_URL ?? '';
 
 let client: S3Client | null = null;
 function getClient(): S3Client {
@@ -58,9 +57,4 @@ export async function presignDownload(key: string): Promise<string> {
 export async function deleteObject(key: string): Promise<void> {
   if (!bucket) return;
   await getClient().send(new DeleteObjectCommand({ Bucket: bucket, Key: key }));
-}
-
-export function publicUrl(key: string): string {
-  if (publicUrlBase) return `${publicUrlBase.replace(/\/$/, '')}/${key}`;
-  return `${endpoint?.replace(/\/$/, '')}/${bucket}/${key}`;
 }

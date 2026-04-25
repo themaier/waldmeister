@@ -3,7 +3,7 @@ import { error, redirect } from '@sveltejs/kit';
 import { z } from 'zod';
 import { db } from '$lib/server/db';
 import { forestPlots, forestPlotParcels } from '$lib/server/db/schema';
-import { resolveParcelIds } from '$lib/server/bayernatlas';
+import { parcelsTakenByUser, resolveParcelIds } from '$lib/server/bayernatlas';
 
 export const createPlot = form(
   z.object({
@@ -23,6 +23,15 @@ export const createPlot = form(
       error(
         400,
         `Flurstück${missing.length === 1 ? '' : 'e'} ${missing.join(', ')} nicht im Cache. Bitte Karte neu laden.`
+      );
+    }
+
+    const taken = await parcelsTakenByUser(locals.user.id, ids);
+    if (taken.size > 0) {
+      const list = Array.from(taken.keys()).join(', ');
+      error(
+        400,
+        `Flurstück${taken.size === 1 ? '' : 'e'} ${list} bereits einem anderen Waldstück zugeordnet.`
       );
     }
 

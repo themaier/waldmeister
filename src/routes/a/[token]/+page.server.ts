@@ -13,7 +13,7 @@ import {
 } from '$lib/server/db/schema';
 import { and, eq, inArray, asc } from 'drizzle-orm';
 import { geomToGeoJson } from '$lib/server/db/geo';
-import { publicUrl } from '$lib/server/s3';
+import { presignDownload } from '$lib/server/s3';
 
 interface Visibility {
   anfahrten: boolean;
@@ -96,6 +96,15 @@ export const load: PageServerLoad = async ({ params }) => {
     imagesByTree.set(img.treeId, arr);
   }
 
+  const visiblePlotPhotos = plotPhotos.filter((p) => p.showOnMap);
+  const signedUrls = new Map<string, string>();
+  const allKeys = [...imgs.map((i) => i.s3Key), ...visiblePlotPhotos.map((p) => p.s3Key)];
+  await Promise.all(
+    allKeys.map(async (key) => {
+      signedUrls.set(key, await presignDownload(key));
+    })
+  );
+
   return {
     order: {
       id: order.id,
@@ -118,7 +127,7 @@ export const load: PageServerLoad = async ({ params }) => {
       description: vis.tree_descriptions ? w.tree.description : null,
       treeTypeId: w.tree.treeTypeId,
       images: (imagesByTree.get(w.tree.id) ?? []).map((i) => ({
-        url: publicUrl(i.s3Key),
+        url: signedUrls.get(i.s3Key)!,
         width: i.widthPx,
         height: i.heightPx
       }))
@@ -132,16 +141,14 @@ export const load: PageServerLoad = async ({ params }) => {
       comment: r.comment,
       pathData: r.pathData
     })),
-    plotPhotos: plotPhotos
-      .filter((p) => p.showOnMap)
-      .map((p) => ({
-        id: p.id,
-        plotId: p.plotId,
-        name: p.name,
-        url: publicUrl(p.s3Key),
-        latitude: p.latitude != null ? Number(p.latitude) : null,
-        longitude: p.longitude != null ? Number(p.longitude) : null
-      })),
+    plotPhotos: visiblePlotPhotos.map((p) => ({
+      id: p.id,
+      plotId: p.plotId,
+      name: p.name,
+      url: signedUrls.get(p.s3Key)!,
+      latitude: p.latitude != null ? Number(p.latitude) : null,
+      longitude: p.longitude != null ? Number(p.longitude) : null
+    })),
     areas: areaRows.map((a) => ({
       ...a,
       geometry: typeof a.geometry === 'string' ? JSON.parse(a.geometry) : a.geometry

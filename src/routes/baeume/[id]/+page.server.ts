@@ -3,7 +3,7 @@ import type { PageServerLoad } from './$types';
 import { db } from '$lib/server/db';
 import { forestPlots, trees, treeImages } from '$lib/server/db/schema';
 import { and, eq, asc } from 'drizzle-orm';
-import { publicUrl } from '$lib/server/s3';
+import { presignDownload } from '$lib/server/s3';
 
 export const load: PageServerLoad = async ({ locals, params }) => {
   if (!locals.user) throw redirect(303, '/login');
@@ -30,6 +30,8 @@ export const load: PageServerLoad = async ({ locals, params }) => {
       gpsAccuracyM: tree.trees.gpsAccuracyM != null ? Number(tree.trees.gpsAccuracyM) : null
     },
     plot: tree.forest_plots,
-    images: images.map((i) => ({ ...i, url: publicUrl(i.s3Key) }))
+    images: await Promise.all(
+      images.map(async (i) => ({ ...i, url: await presignDownload(i.s3Key) }))
+    )
   };
 };

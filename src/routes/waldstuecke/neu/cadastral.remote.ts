@@ -1,57 +1,21 @@
-import { getRequestEvent, query } from '$app/server';
+import { getRequestEvent, query, command } from '$app/server';
 import { error } from '@sveltejs/kit';
 import { z } from 'zod';
 import { db } from '$lib/server/db';
+import { tracePolygonAt } from '$lib/server/parcelTrace';
 import { sql } from 'drizzle-orm';
 
 const bboxSchema = z.object({
   bbox: z.tuple([z.number(), z.number(), z.number(), z.number()])
 });
 
-// Hardcoded mock Flurstück used while the LDBV WFS is unreachable.
-// Coordinates are GeoJSON [lon, lat]. The four corners the user provided
-// are walked D→C→B→A so the ring is simple (non-self-intersecting).
-const MOCK_CADASTRAL_ID = 'MOCK-0001';
-const MOCK_GEOMETRY: GeoJSON.Polygon = {
-  type: 'Polygon',
-  coordinates: [
-    [
-      [12.91603, 48.26037],
-      [12.91572, 48.26013],
-      [12.91690, 48.25966],
-      [12.91708, 48.25998],
-      [12.91603, 48.26037]
-    ]
-  ]
+type ParcelRow = {
+  id: string;
+  cadastral_id: string;
+  geometry: string;
+  taken_plot_id: string | null;
+  taken_plot_name: string | null;
 };
-const MOCK_BOUNDS = {
-  minLon: 12.91572,
-  maxLon: 12.91708,
-  minLat: 48.25966,
-  maxLat: 48.26037
-};
-
-async function upsertMock() {
-  await db.execute(sql`
-    INSERT INTO parcels (cadastral_id, gemarkung, municipality, area_sqm, geometry, fetched_at)
-    VALUES (
-      ${MOCK_CADASTRAL_ID},
-      ${'Mock-Gemarkung'},
-      ${null},
-      ${null},
-      ST_SetSRID(ST_GeomFromGeoJSON(${JSON.stringify(MOCK_GEOMETRY)}), 4326),
-      now()
-    )
-    ON CONFLICT (cadastral_id) DO UPDATE SET
-      geometry = EXCLUDED.geometry,
-      fetched_at = EXCLUDED.fetched_at
-  `);
-}
-
-function intersectsMock(bbox: [number, number, number, number]): boolean {
-  const [w, s, e, n] = bbox;
-  return !(e < MOCK_BOUNDS.minLon || w > MOCK_BOUNDS.maxLon || n < MOCK_BOUNDS.minLat || s > MOCK_BOUNDS.maxLat);
-}
 
 export const parcelsInBbox = query('unchecked', async (raw: unknown) => {
   const { locals } = getRequestEvent();
@@ -59,21 +23,84 @@ export const parcelsInBbox = query('unchecked', async (raw: unknown) => {
   const parsed = bboxSchema.safeParse(raw);
   if (!parsed.success) throw error(400, parsed.error.issues[0].message);
 
-  await upsertMock();
+  const [w, s, e, n] = parsed.data.bbox;
 
-  if (!intersectsMock(parsed.data.bbox)) {
-    return { features: [] };
+  // DISTINCT ON (p.id) collapses the left-join fan-out so each parcel
+  // appears once; NULLS LAST preferentially keeps the row that identifies
+  // a plot the current user owns.
+  const rows = await db.execute<ParcelRow>(sql`
+    SELECT DISTINCT ON (p.id)
+      p.id::text               AS id,
+      p.cadastral_id           AS cadastral_id,
+      ST_AsGeoJSON(p.geometry) AS geometry,
+      fp.id::text              AS taken_plot_id,
+      fp.name                  AS taken_plot_name
+    FROM parcels p
+    LEFT JOIN forest_plot_parcels fpp ON fpp.parcel_id = p.id
+    LEFT JOIN forest_plots fp
+      ON fp.id = fpp.plot_id AND fp.owner_id = ${locals.user.id}
+    WHERE p.geometry && ST_MakeEnvelope(${w}, ${s}, ${e}, ${n}, 4326)
+    ORDER BY p.id, fp.id NULLS LAST
+  `);
+
+  const features = rows.map((r) => ({
+    id: r.id,
+    cadastralId: r.cadastral_id,
+    geometry: JSON.parse(r.geometry) as GeoJSON.Polygon | GeoJSON.MultiPolygon,
+    takenBy: r.taken_plot_id ? { plotId: r.taken_plot_id, plotName: r.taken_plot_name } : null
+  }));
+
+  return { features };
+});
+
+const traceSchema = z.object({
+  lng: z.number().min(-180).max(180),
+  lat: z.number().min(-90).max(90)
+});
+
+export const traceParcelAt = command('unchecked', async (raw: unknown) => {
+  const { locals } = getRequestEvent();
+  if (!locals.user) throw error(401, 'Nicht angemeldet.');
+  const parsed = traceSchema.safeParse(raw);
+  if (!parsed.success) throw error(400, parsed.error.issues[0].message);
+  const { lng, lat } = parsed.data;
+
+  // If an existing parcel already contains this point, reuse it — tracing
+  // the same shape twice would create a duplicate polygon with a different
+  // generated cadastral id.
+  const existing = await db.execute<{ cadastral_id: string }>(sql`
+    SELECT cadastral_id
+    FROM parcels
+    WHERE ST_Contains(geometry, ST_SetSRID(ST_MakePoint(${lng}, ${lat}), 4326))
+    LIMIT 1
+  `);
+  if (existing[0]) return { cadastralId: existing[0].cadastral_id };
+
+  let ring: [number, number][];
+  try {
+    ring = await tracePolygonAt(lng, lat);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    console.error('[traceParcelAt] tracePolygonAt threw:', e);
+    throw error(422, msg);
   }
-  return {
-    features: [
-      {
-        id: MOCK_CADASTRAL_ID,
-        cadastralId: MOCK_CADASTRAL_ID,
-        gemarkung: 'Mock-Gemarkung',
-        municipality: null,
-        areaSqm: null,
-        geometry: MOCK_GEOMETRY
-      }
-    ]
-  };
+  console.log('[traceParcelAt] ring length=', ring.length);
+  if (ring.length < 4) throw error(422, 'Parzelle konnte nicht erkannt werden.');
+
+  const geometry: GeoJSON.Polygon = { type: 'Polygon', coordinates: [ring] };
+  const cadastralId = `TRACED-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+
+  await db.execute(sql`
+    INSERT INTO parcels (cadastral_id, gemarkung, municipality, area_sqm, geometry, fetched_at)
+    VALUES (
+      ${cadastralId},
+      NULL,
+      NULL,
+      NULL,
+      ST_SetSRID(ST_GeomFromGeoJSON(${JSON.stringify(geometry)}), 4326),
+      now()
+    )
+  `);
+
+  return { cadastralId };
 });

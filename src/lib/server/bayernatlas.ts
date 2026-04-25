@@ -12,8 +12,8 @@
 
 import { env } from '$env/dynamic/private';
 import { db } from './db';
-import { parcels } from './db/schema';
-import { inArray, sql } from 'drizzle-orm';
+import { forestPlots, forestPlotParcels, parcels } from './db/schema';
+import { and, eq, inArray, sql } from 'drizzle-orm';
 
 // Flurstück WFS endpoint. The LDBV "ALKIS-vereinfacht" WFS lives at
 // https://geoservices.bayern.de/wfs/v1/ogc_alkis_ave.cgi and requires HTTP
@@ -225,4 +225,29 @@ export async function resolveParcelIds(cadastralIds: string[]): Promise<Map<stri
     .from(parcels)
     .where(inArray(parcels.cadastralId, cadastralIds));
   return new Map(rows.map((r) => [r.cadastralId, r.id]));
+}
+
+/**
+ * Cadastral ids from the given list that are already linked to one of
+ * the user's own Waldstücke, mapped to the owning plot. A parcel may still
+ * be claimed by other users' plots — those aren't returned.
+ */
+export async function parcelsTakenByUser(
+  userId: string,
+  cadastralIds: string[]
+): Promise<Map<string, { plotId: string; plotName: string | null }>> {
+  if (cadastralIds.length === 0) return new Map();
+  const rows = await db
+    .select({
+      cadastralId: parcels.cadastralId,
+      plotId: forestPlots.id,
+      plotName: forestPlots.name
+    })
+    .from(forestPlotParcels)
+    .innerJoin(forestPlots, eq(forestPlots.id, forestPlotParcels.plotId))
+    .innerJoin(parcels, eq(parcels.id, forestPlotParcels.parcelId))
+    .where(
+      and(eq(forestPlots.ownerId, userId), inArray(parcels.cadastralId, cadastralIds))
+    );
+  return new Map(rows.map((r) => [r.cadastralId, { plotId: r.plotId, plotName: r.plotName }]));
 }

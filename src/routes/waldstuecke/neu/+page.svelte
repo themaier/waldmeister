@@ -8,14 +8,14 @@
   import Map from '$lib/components/Map.svelte';
   import { Trash } from 'phosphor-svelte';
   import maplibregl from 'maplibre-gl';
-  import { parcelsInBbox } from './cadastral.remote';
+  import { onMount } from 'svelte';
+  import { parcelsInBbox, traceParcelAt } from './cadastral.remote';
   import { createPlot } from './create.remote';
 
   type AlkisParcel = {
     cadastralId: string;
-    gemarkung: string | null;
-    areaSqm: number | null;
     geometry: GeoJSON.Polygon | GeoJSON.MultiPolygon;
+    takenBy: { plotId: string; plotName: string | null } | null;
   };
 
   let mapRef = $state<Map | undefined>();
@@ -31,8 +31,12 @@
   let layersReady = false;
   let fetchTimer: ReturnType<typeof setTimeout> | null = null;
   let loadError = $state<string | null>(null);
+  let tracing = $state(false);
 
   const MIN_FETCH_ZOOM = 15;
+  // Below this zoom the raster tiles don't show the parcel outlines clearly
+  // enough for tracing, and the 7×7 window would cover a huge area.
+  const MIN_TRACE_ZOOM = 16;
 
   // --- Map layers -----------------------------------------------------------
 
@@ -47,12 +51,16 @@
       paint: {
         'fill-color': [
           'case',
+          ['==', ['get', 'taken'], true],
+          '#6b7280',
           ['==', ['get', 'selected'], true],
           '#5d7a4a',
           '#c76a2b'
         ],
         'fill-opacity': [
           'case',
+          ['==', ['get', 'taken'], true],
+          0.35,
           ['==', ['get', 'selected'], true],
           0.55,
           0.25
@@ -66,6 +74,8 @@
       paint: {
         'line-color': [
           'case',
+          ['==', ['get', 'taken'], true],
+          '#374151',
           ['==', ['get', 'selected'], true],
           '#1f3d2c',
           '#c76a2b'
@@ -78,17 +88,29 @@
         ]
       }
     });
-
-    m.on('click', 'alkis-fill', (e) => {
-      const f = e.features?.[0];
-      const cid = f?.properties?.cadastralId as string | undefined;
-      if (!cid) return;
-      if (selection[cid]) delete selection[cid];
-      else selection[cid] = true;
-      renderAlkis();
+    m.addLayer({
+      id: 'alkis-label',
+      type: 'symbol',
+      source: 'alkis',
+      filter: ['==', ['get', 'taken'], true],
+      layout: {
+        'text-field': ['get', 'plotName'],
+        'text-size': 13,
+        'text-font': ['Open Sans Regular', 'Arial Unicode MS Regular'],
+        'symbol-placement': 'point',
+        'text-allow-overlap': false
+      },
+      paint: {
+        'text-color': '#1f2937',
+        'text-halo-color': '#f5f1e6',
+        'text-halo-width': 1.5
+      }
     });
-    m.on('mouseenter', 'alkis-fill', () => {
-      m.getCanvas().style.cursor = 'pointer';
+
+    m.on('mouseenter', 'alkis-fill', (e) => {
+      const cid = e.features?.[0]?.properties?.cadastralId as string | undefined;
+      const taken = cid ? !!featureCache[cid]?.takenBy : false;
+      m.getCanvas().style.cursor = taken ? 'not-allowed' : 'pointer';
     });
     m.on('mouseleave', 'alkis-fill', () => {
       m.getCanvas().style.cursor = '';
@@ -110,7 +132,9 @@
         geometry: f.geometry,
         properties: {
           cadastralId: f.cadastralId,
-          selected: !!selection[f.cadastralId]
+          selected: !!selection[f.cadastralId],
+          taken: !!f.takenBy,
+          plotName: f.takenBy?.plotName ?? 'Ohne Name'
         }
       }))
     });
@@ -133,10 +157,12 @@
       for (const f of res.features) {
         featureCache[f.cadastralId] = {
           cadastralId: f.cadastralId,
-          gemarkung: f.gemarkung,
-          areaSqm: f.areaSqm,
-          geometry: f.geometry
+          geometry: f.geometry,
+          takenBy: f.takenBy
         };
+        if (f.takenBy && selection[f.cadastralId]) {
+          delete selection[f.cadastralId];
+        }
       }
       renderAlkis();
     } catch (e) {
@@ -154,11 +180,58 @@
     renderAlkis();
   }
 
-  // --- Lifecycle ------------------------------------------------------------
+  // --- Click routing -------------------------------------------------------
+  // A click on an existing parcel toggles its selection; a click on empty
+  // terrain triggers a server-side trace of the parcel outline from the
+  // Parzellarkarte raster tiles.
+  async function handleMapClick(ev: { lng: number; lat: number }) {
+    console.log('[neu] handleMapClick', ev, 'mlMap=', !!mlMap, 'tracing=', tracing, 'layersReady=', layersReady);
+    if (!mlMap || tracing) return;
+    const pt = mlMap.project([ev.lng, ev.lat]);
+    const hits = layersReady
+      ? mlMap.queryRenderedFeatures(pt, { layers: ['alkis-fill'] })
+      : [];
+    console.log('[neu] hits=', hits.length, 'zoom=', mlMap.getZoom(), 'MIN_TRACE_ZOOM=', MIN_TRACE_ZOOM);
+    if (hits.length > 0) {
+      const cid = hits[0].properties?.cadastralId as string | undefined;
+      if (!cid) return;
+      if (featureCache[cid]?.takenBy) return;
+      if (selection[cid]) delete selection[cid];
+      else selection[cid] = true;
+      renderAlkis();
+      return;
+    }
 
-  $effect(() => {
-    if (!mapRef) return;
-    const m = mapRef.instance();
+    if (mlMap.getZoom() < MIN_TRACE_ZOOM) {
+      loadError = 'Zum Erkennen der Parzelle bitte näher heranzoomen.';
+      return;
+    }
+
+    loadError = null;
+    tracing = true;
+    try {
+      console.log('[neu] -> traceParcelAt');
+      const { cadastralId } = await traceParcelAt({ lng: ev.lng, lat: ev.lat });
+      console.log('[neu] traced cid=', cadastralId);
+      await fetchViewport();
+      if (featureCache[cadastralId] && !featureCache[cadastralId].takenBy) {
+        selection[cadastralId] = true;
+      }
+      renderAlkis();
+    } catch (e) {
+      console.error('[neu] traceParcelAt failed', e);
+      loadError = e instanceof Error ? e.message : 'Parzelle konnte nicht erkannt werden.';
+    } finally {
+      tracing = false;
+    }
+  }
+
+  // --- Lifecycle ------------------------------------------------------------
+  // Svelte mounts children before parents, so Map.svelte's internal MapLibre
+  // instance is already created by the time this runs.
+
+  onMount(() => {
+    const m = mapRef?.instance();
     if (!m) return;
     mlMap = m;
     const init = () => {
@@ -206,7 +279,18 @@
   </header>
 
   <div class="relative">
-    <Map bind:this={mapRef} initialCenter={[12.9164, 48.2600]} initialZoom={17} />
+    <Map
+      bind:this={mapRef}
+      initialCenter={[12.9164, 48.2600]}
+      initialZoom={17}
+      onClick={handleMapClick}
+    />
+
+    {#if tracing}
+      <div class="absolute top-4 left-1/2 -translate-x-1/2 z-10 px-4 py-2 rounded-btn bg-surface/90 border text-sm text-content shadow-duff">
+        Parzelle wird erkannt …
+      </div>
+    {/if}
 
     <div class="sheet p-5 pt-6 flex flex-col gap-4">
       <label class="flex flex-col gap-2">
@@ -243,12 +327,7 @@
         <ul class="flex flex-col gap-1 max-h-40 overflow-auto">
           {#each selectedIds as cid (cid)}
             <li class="flex items-center justify-between gap-2 bg-earth border px-3 py-2 rounded-btn">
-              <div class="flex flex-col gap-[2px]">
-                <span class="mono text-sm text-content">{cid}</span>
-                {#if featureCache[cid]?.gemarkung}
-                  <span class="text-xs text-content-muted">{featureCache[cid].gemarkung}</span>
-                {/if}
-              </div>
+              <span class="mono text-sm text-content">{cid}</span>
               <button
                 type="button"
                 class="w-8 h-8 min-h-0 grid place-items-center rounded-full text-content-muted hover:text-crimson hover:bg-surface-muted transition"
