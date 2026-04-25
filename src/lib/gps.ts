@@ -104,7 +104,12 @@ export async function getBetterGpsFix(opts: GetBetterGpsFixOptions = {}): Promis
           };
           if (!best || fix.acc < best.acc) best = fix;
         },
-        () => finish(null),
+        // Tolerate transient errors (POSITION_UNAVAILABLE / TIMEOUT) — these are
+        // common right after a previous watch was cleared and the GPS often
+        // recovers within the timeout window. Only bail out on PERMISSION_DENIED.
+        (err) => {
+          if (err.code === err.PERMISSION_DENIED) finish(null);
+        },
         {
           enableHighAccuracy: true,
           maximumAge: maximumAgeMs,

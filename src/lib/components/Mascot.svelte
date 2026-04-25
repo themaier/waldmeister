@@ -101,11 +101,11 @@
   <!-- Ground shadow -->
   <ellipse cx="240" cy="780" rx="170" ry="11" fill="#000" opacity="0.5" filter="url(#m-soft)" />
 
-  <!-- Cloak — body only. Top closure runs through the face equator and is fully hidden by the head. -->
+  <!-- Cloak — egg-rounded shoulders at the top, original jagged hem at the bottom. -->
   <path
     d="M 194 210
-       C 190 240, 184 270, 184 300
-       C 166 308, 154 334, 148 372
+       C 186 222, 168 236, 148 252
+       C 144 290, 150 332, 148 372
        L 120 770
        L 158 752
        L 178 770
@@ -116,8 +116,8 @@
        L 322 752
        L 360 770
        L 332 372
-       C 326 334, 314 308, 296 300
-       C 296 270, 290 240, 286 210
+       C 330 332, 336 290, 332 252
+       C 312 236, 294 222, 286 210
        L 194 210 Z"
     fill="url(#m-cloak)"
   />
@@ -136,44 +136,64 @@
 
   <!-- Hat -->
   <g>
-    <!-- Pointed witch-hat dome -->
+    <!-- Magic-hat dome — wide flared base, bulging sides, soft curled apex -->
     <path
-      d="M 184 210
-         C 196 175, 220 140, 240 110
-         C 260 140, 284 175, 296 210 Z"
+      d="M 162 212
+         C 188 200, 196 170, 212 142
+         C 224 122, 226 110, 240 100
+         C 254 110, 256 122, 268 142
+         C 284 170, 292 200, 318 212
+         C 296 218, 270 218, 240 218
+         C 210 218, 184 218, 162 212 Z"
       fill="url(#m-dome)"
     />
 
-    <!-- Brim band — thin, sits right at the head -->
+    <!-- Brim band — wide flared brim sweeping out to the sides -->
     <path
-      d="M 178 210
-         C 184 206, 198 204, 210 204
-         L 270 204
-         C 282 204, 296 206, 302 210
-         C 296 216, 282 218, 270 216
-         L 210 216
-         C 198 218, 184 216, 178 210 Z"
+      d="M 152 214
+         C 168 206, 198 202, 210 202
+         L 270 202
+         C 282 202, 312 206, 328 214
+         C 312 224, 282 224, 270 222
+         L 210 222
+         C 198 224, 168 224, 152 214 Z"
       fill="#1a2f18"
     />
-    <path d="M 188 208 C 210 206, 270 206, 292 208" stroke="#5d7a4a" stroke-width="1.2" fill="none" opacity="0.7" />
-    <path d="M 188 214 C 210 216, 270 216, 292 214" stroke="#070d09" stroke-width="0.9" fill="none" opacity="0.5" />
+    <path d="M 168 210 C 200 204, 280 204, 312 210" stroke="#5d7a4a" stroke-width="1.2" fill="none" opacity="0.7" />
+    <path d="M 168 218 C 200 222, 280 222, 312 218" stroke="#070d09" stroke-width="0.9" fill="none" opacity="0.5" />
 
-    <!-- Bottom row — widest, follows the brim -->
+    <!-- Bottom row — widest, overhanging the brim -->
+    <path d="M 174 200 C 162 192, 162 176, 180 178 C 188 188, 184 206, 174 200 Z" fill="#2a4422" />
     <path d="M 192 200 C 184 188, 186 174, 198 178 C 204 188, 200 204, 192 200 Z" fill="#2a4422" />
     <path d="M 214 196 C 206 184, 208 168, 222 174 C 226 184, 222 200, 214 196 Z" fill="#3d5b30" />
     <path d="M 234 192 C 226 178, 230 162, 240 168 C 244 180, 242 196, 234 192 Z" fill="#4f6c3a" />
     <path d="M 246 192 C 254 178, 250 162, 240 168 C 236 180, 238 196, 246 192 Z" fill="#3d5b30" />
     <path d="M 266 196 C 274 184, 272 168, 258 174 C 254 184, 258 200, 266 196 Z" fill="#4f6c3a" />
     <path d="M 288 200 C 296 188, 294 174, 282 178 C 276 188, 280 204, 288 200 Z" fill="#2a4422" />
+    <path d="M 306 200 C 318 192, 318 176, 300 178 C 292 188, 296 206, 306 200 Z" fill="#2a4422" />
+
+    <!-- Filler leaves between rows -->
+    <path d="M 200 184 C 190 172, 196 158, 208 166 C 210 178, 208 192, 200 184 Z" fill="#4f6c3a" />
+    <path d="M 280 184 C 290 172, 284 158, 272 166 C 270 178, 272 192, 280 184 Z" fill="#4f6c3a" />
+    <path d="M 224 188 C 218 174, 226 160, 234 168 C 234 178, 230 196, 224 188 Z" fill="#5d7a4a" />
+    <path d="M 256 188 C 262 174, 254 160, 246 168 C 246 178, 250 196, 256 188 Z" fill="#5d7a4a" />
 
     <!-- Mid row — narrower, follows the cone -->
+    <path d="M 206 174 C 198 162, 204 146, 214 152 C 216 164, 212 188, 206 174 Z" fill="#5d7a4a" />
     <path d="M 218 178 C 210 164, 214 148, 226 154 C 230 166, 226 184, 218 178 Z" fill="#5d7a4a" />
     <path d="M 240 170 C 232 154, 248 144, 254 158 C 256 172, 248 184, 240 170 Z" fill="#7aa36a" />
     <path d="M 262 178 C 270 164, 266 148, 254 154 C 250 166, 254 184, 262 178 Z" fill="#5d7a4a" />
+    <path d="M 274 174 C 282 162, 276 146, 266 152 C 264 164, 268 188, 274 174 Z" fill="#5d7a4a" />
 
     <!-- Upper row — small leaves near the apex -->
+    <path d="M 222 156 C 214 142, 226 130, 232 142 C 232 152, 228 166, 222 156 Z" fill="#5d7a4a" />
     <path d="M 228 152 C 222 138, 234 128, 240 138 C 240 148, 234 160, 228 152 Z" fill="#7aa36a" />
     <path d="M 252 152 C 258 138, 246 128, 240 138 C 240 148, 246 160, 252 152 Z" fill="#7aa36a" />
+    <path d="M 258 156 C 266 142, 254 130, 248 142 C 248 152, 252 166, 258 156 Z" fill="#5d7a4a" />
+
+    <!-- Top cluster -->
+    <path d="M 234 132 C 228 120, 238 110, 242 122 C 240 130, 236 140, 234 132 Z" fill="#7aa36a" />
+    <path d="M 246 132 C 252 120, 242 110, 238 122 C 240 130, 244 140, 246 132 Z" fill="#7aa36a" />
 
     <!-- Apex tip leaf -->
     <path d="M 240 116 C 234 106, 246 102, 246 114 C 244 122, 240 122, 240 116 Z" fill="#4f6c3a" />
@@ -192,7 +212,7 @@
     <!-- Brim shadow over the upper face — fades just above the smile -->
     <path
       d="M 196 222
-         C 218 232, 262 232, 284 222
+         C 218 214, 262 214, 284 222
          L 284 238
          C 262 232, 218 232, 196 238 Z"
       fill="url(#m-brim-shadow)"

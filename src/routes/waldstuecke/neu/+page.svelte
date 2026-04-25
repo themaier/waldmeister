@@ -243,7 +243,7 @@
   });
 </script>
 
-<form {...createPlot} class="home-shell">
+<form {...createPlot} class="home-shell" style="height: 100dvh; min-height: 0;">
   <header class="bg-surface/85 backdrop-blur-md backdrop-saturate-150 border-b">
     <div class="flex items-center gap-3 px-4 py-2">
       <a
@@ -272,7 +272,7 @@
     </div>
   </header>
 
-  <div class="home-map relative">
+  <div class="home-map relative" style="flex: 1 1 0; height: auto; min-height: 0;">
     <Map
       bind:this={mapRef}
       initialCenter={[11.5, 48.5]}
@@ -288,7 +288,10 @@
       </div>
     {/if}
 
-    <div class="sheet p-5 pt-6 flex flex-col gap-4">
+    <div
+      class="absolute inset-x-0 bottom-0 z-10 bg-surface border-t shadow-canopy px-5 pt-5 pb-8 flex flex-col gap-4"
+      style="border-top-left-radius: var(--radius-sheet); border-top-right-radius: var(--radius-sheet); max-height: 85%;"
+    >
       <label class="flex flex-col gap-2">
         <span class="text-[0.8125rem] font-semibold text-content"
           >Name (optional)</span

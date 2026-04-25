@@ -74,7 +74,15 @@
   let error = $state<string | null>(null);
   let gpsCapturing = $state(false);
   let gpsFirstFixPending = $state(untrack(() => data.initial.latitude === null || data.initial.longitude === null));
-  let gpsMode = $state<'auto' | 'manual'>('auto');
+  // If we arrived with coords but no accuracy, the user picked the spot on the
+  // previous map — treat that as manual placement.
+  let gpsMode = $state<'auto' | 'manual'>(
+    untrack(() =>
+      data.initial.latitude !== null && data.initial.longitude !== null && data.initial.gpsAccuracyM === null
+        ? 'manual'
+        : 'auto'
+    )
+  );
   let gpsImprovementCount = $state(0);
   let gpsRefineStartedAt = $state<number | null>(null);
   let gpsRefineLastImprovedAt = $state<number | null>(null);
@@ -397,14 +405,9 @@
             Position
           </h2>
           {#if gpsCapturing && gpsFirstFixPending}
-            <div class="inline-flex items-center gap-2 px-3 py-2 rounded-btn border bg-earth text-sm font-semibold text-content-muted">
+            <div class="inline-flex items-center gap-2 px-3 py-2 mb-3 rounded-btn border bg-earth text-sm font-semibold text-content-muted">
               <span class="spinner" aria-hidden="true"></span>
               GPS wird ermittelt …
-            </div>
-          {:else if gpsRefining}
-            <div class="inline-flex items-center gap-2 px-3 py-2 rounded-btn border bg-earth text-sm font-semibold text-content-muted">
-              <span class="spinner" aria-hidden="true"></span>
-              Standort wird verbessert
             </div>
           {/if}
           {#if latitude !== null && longitude !== null}
@@ -414,14 +417,22 @@
               <span class="text-content-faint">·</span>
               <span>{longitude.toFixed(6)}</span>
             </div>
-            <p class="text-xs text-content-muted mt-2">
-              Genauigkeit:
-              {#if gpsAccuracyM === null}
-                {gpsMode === 'manual' ? 'unbekannt (manuell gesetzt)' : 'wird ermittelt'}
-              {:else}
-                ±{gpsAccuracyM.toFixed(1)} m
-              {/if}
-            </p>
+            {#if gpsMode !== 'manual'}
+              <p class="text-xs text-content-muted mt-2">
+                Genauigkeit:
+                {#if gpsAccuracyM === null}
+                  wird ermittelt
+                {:else}
+                  ±{gpsAccuracyM.toFixed(1)} m
+                {/if}
+                {#if gpsRefining}
+                  <span class="inline-flex items-center gap-1 ml-1 text-content-faint">
+                    <span class="spinner spinner-xs" aria-hidden="true"></span>
+                    <span>wird verfeinert</span>
+                  </span>
+                {/if}
+              </p>
+            {/if}
           {:else}
             <p class="text-sm text-content-muted">Keine Koordinaten.</p>
           {/if}
@@ -430,7 +441,7 @@
           class="inline-flex items-center gap-2 px-3 py-2 min-h-[40px] rounded-btn bg-earth border text-ink text-sm font-semibold hover:border-pine transition"
           onclick={retakeGps}
         >
-          <Crosshair size="1em" /> Erneut
+          <Crosshair size="1em" /> {gpsMode === 'manual' ? 'GPS verwenden' : 'Erneut'}
         </button>
       </div>
 
@@ -597,6 +608,11 @@
     border: 2px solid color-mix(in oklab, var(--color-ink) 18%, transparent);
     border-top-color: color-mix(in oklab, var(--color-pine) 80%, transparent);
     animation: spin 800ms linear infinite;
+  }
+  .spinner-xs {
+    width: 0.75em;
+    height: 0.75em;
+    border-width: 1.5px;
   }
   @keyframes spin {
     to {

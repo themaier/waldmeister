@@ -1053,7 +1053,7 @@
     userName={data.user?.name ?? ""}
   />
 
-  <div class="home-map">
+  <div class="home-map !sticky !top-[61px] !z-0">
     <Map
       bind:this={mapRef}
       onClick={onMapClick}
@@ -1180,7 +1180,7 @@
        Bäume / Bereich into one focused view at a time. Hidden while a tool
        is active so the user's focus stays on the map. -->
   {#if activePlot && !routeDrawType && !placementMode && !areaDrawActive}
-    <section class="home-scroll">
+    <section class="home-scroll relative z-10">
       <!-- Tab strip — segmented control at the top of the bottom panel. -->
       <div
         role="tablist"
