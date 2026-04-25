@@ -125,7 +125,7 @@
         }))
       };
 
-      let result: { treeId: string; uploads: { index: number; url: string }[] };
+      let result: { treeId: string; uploads: { index: number; url: string; contentType: string }[] };
       try {
         result = await createTree(body);
       } catch (e) {
@@ -134,12 +134,21 @@
       }
       const { treeId, uploads } = result;
       for (const u of uploads) {
+        if (!u.url) {
+          error =
+            'Keine Upload-URL vom Server (S3 presign fehlgeschlagen). Prüfe S3_* in .env und die Server-Logs.';
+          return;
+        }
         const img = images[u.index];
-        await fetch(u.url, {
+        const put = await fetch(u.url, {
           method: 'PUT',
-          headers: { 'content-type': img.file.type || 'image/jpeg' },
+          headers: { 'content-type': u.contentType },
           body: img.file
         });
+        if (!put.ok) {
+          error = `Foto-Upload fehlgeschlagen (HTTP ${put.status}). Bei Cloudflare R2: unter Bucket → Settings → CORS eine Regel mit AllowedMethods PUT (und für Downloads GET), AllowedHeaders inkl. Content-Type, und AllowedOrigins exakt dein App-Ursprung (z. B. http://localhost:3000) setzen. Siehe https://developers.cloudflare.com/r2/buckets/cors/`;
+          return;
+        }
       }
       await goto(`/baeume/${treeId}`);
     } finally {

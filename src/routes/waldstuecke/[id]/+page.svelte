@@ -76,7 +76,7 @@
       const { width, height } = await imageSize(stonePreview);
       const gps = stoneCaptureGps ? await getGpsOnce() : null;
 
-      let result: { id: string; uploadUrl: string };
+      let result: { id: string; uploadUrl: string; contentType: string };
       try {
         result = await createBoundaryStone({
           plotId: data.plot.id,
@@ -93,12 +93,19 @@
         return;
       }
 
-      if (result.uploadUrl) {
-        await fetch(result.uploadUrl, {
-          method: 'PUT',
-          headers: { 'content-type': stoneFile.type || 'image/jpeg' },
-          body: stoneFile
-        });
+      if (!result.uploadUrl) {
+        stoneError =
+          'Keine Upload-URL vom Server (S3 presign fehlgeschlagen). Prüfe S3_* in .env und die Server-Logs.';
+        return;
+      }
+      const put = await fetch(result.uploadUrl, {
+        method: 'PUT',
+        headers: { 'content-type': result.contentType },
+        body: stoneFile
+      });
+      if (!put.ok) {
+        stoneError = `Foto-Upload fehlgeschlagen (HTTP ${put.status}). Bei Cloudflare R2: CORS für PUT von deinem App-Ursprung erlauben (siehe https://developers.cloudflare.com/r2/buckets/cors/).`;
+        return;
       }
 
       clearStoneDraft();

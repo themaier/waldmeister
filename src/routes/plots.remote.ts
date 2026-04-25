@@ -1,9 +1,8 @@
-import { getRequestEvent, command, query } from '$app/server';
+import { getRequestEvent, command } from '$app/server';
 import { error } from '@sveltejs/kit';
 import { z } from 'zod';
 import { db } from '$lib/server/db';
 import { forestPlots } from '$lib/server/db/schema';
-import { listOfficialTreeDotsForPlot } from '$lib/server/tree-count-bayern';
 import { and, eq } from 'drizzle-orm';
 
 const renameSchema = z.object({
@@ -36,18 +35,4 @@ export const deletePlot = command(z.string().uuid(), async (id) => {
     .returning({ id: forestPlots.id });
   if (res.length === 0) throw error(404, 'Waldstück nicht gefunden.');
   return { ok: true };
-});
-
-// Tree dots are scoped to the active plot only — never the whole region —
-// so callers just pass the plot id.
-export const officialTreeDotsForPlot = query(z.string().uuid(), async (plotId) => {
-  const { locals } = getRequestEvent();
-  if (!locals.user) throw error(401, 'Nicht angemeldet.');
-
-  try {
-    return await listOfficialTreeDotsForPlot(plotId, locals.user.id);
-  } catch (e) {
-    console.error('[officialTreeDotsForPlot] failed:', e);
-    throw error(400, e instanceof Error ? e.message : 'Baum-Overlay fehlgeschlagen.');
-  }
 });

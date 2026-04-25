@@ -6,6 +6,7 @@ import { forestPlots, trees, treeImages, accessRoutes, areas } from '$lib/server
 import { geomToGeoJson } from '$lib/server/db/geo';
 import { and, eq, sql } from 'drizzle-orm';
 import { presignUpload, treeImageKey } from '$lib/server/s3';
+import { listOfficialTreeDotsForPlot } from '$lib/server/tree-count-bayern';
 import { TREE_TYPES, HEALTH_STATUSES, TREE_LABELS } from '$lib/enums';
 
 const createSchema = z.object({
@@ -72,9 +73,10 @@ export const createTree = command('unchecked', async (raw: unknown) => {
     })
     .returning({ id: trees.id });
 
-  const uploads: { index: number; url: string }[] = [];
+  const uploads: { index: number; url: string; contentType: string }[] = [];
   for (let i = 0; i < input.images.length; i++) {
     const img = input.images[i];
+    const contentType = (img.contentType && img.contentType.trim()) || 'image/jpeg';
     const key = treeImageKey(locals.user.id, tree.id, crypto.randomUUID());
     await db.insert(treeImages).values({
       treeId: tree.id,
@@ -84,10 +86,10 @@ export const createTree = command('unchecked', async (raw: unknown) => {
       heightPx: img.heightPx
     });
     try {
-      uploads.push({ index: i, url: await presignUpload(key, img.contentType) });
+      uploads.push({ index: i, url: await presignUpload(key, contentType), contentType });
     } catch (e) {
       console.warn('S3 presign failed (dev mode?):', (e as Error).message);
-      uploads.push({ index: i, url: '' });
+      uploads.push({ index: i, url: '', contentType });
     }
   }
 
@@ -152,4 +154,16 @@ export const getPlotOverview = query(z.string().uuid(), async (plotId) => {
         typeof row.geometry === 'string' ? JSON.parse(row.geometry) : row.geometry
     }))
   };
+});
+
+export const officialTreeDotsForPlot = query(z.string().uuid(), async (plotId) => {
+  const { locals } = getRequestEvent();
+  if (!locals.user) throw error(401, 'Nicht angemeldet.');
+
+  try {
+    return await listOfficialTreeDotsForPlot(plotId, locals.user.id);
+  } catch (e) {
+    console.error('[officialTreeDotsForPlot] failed:', e);
+    throw error(400, e instanceof Error ? e.message : 'Baum-Overlay fehlgeschlagen.');
+  }
 });

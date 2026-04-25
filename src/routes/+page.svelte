@@ -22,8 +22,7 @@
   } from "phosphor-svelte";
   import type { PageData } from "./$types";
   import maplibregl from "maplibre-gl";
-  import { getPlotOverview } from "./trees.remote";
-  import { officialTreeDotsForPlot } from "./plots.remote";
+  import { getPlotOverview, officialTreeDotsForPlot } from "./trees.remote";
   import { createRoute } from "./access-routes.remote";
   import { createArea, deleteArea } from "./areas.remote";
   import {
