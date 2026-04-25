@@ -37,11 +37,19 @@ export const handle: Handle = async ({ event, resolve }) => {
   }
 
   const path = event.url.pathname;
+  // `/_app/*` covers SvelteKit internals: client JS chunks, the data-loading
+  // protocol, and remote functions. Never redirect these — remote functions
+  // enforce their own auth (`error(401)`) and a 303 here gets translated into
+  // a JSON redirect that the remote-function client surfaces as "Failed to
+  // execute remote function" / "Redirects are not allowed in commands". This
+  // bites mobile harder because Safari is stricter about cookies, so a single
+  // missing session cookie cascades into every remote call failing.
   const isPublic =
     path === '/login' ||
     path === '/register' ||
     path.startsWith('/api/auth') ||
-    path.startsWith('/a/');
+    path.startsWith('/a/') ||
+    path.startsWith('/_app/');
   if (!event.locals.user && !isPublic) {
     throw redirect(303, '/login');
   }

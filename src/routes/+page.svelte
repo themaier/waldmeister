@@ -12,6 +12,7 @@
   import OnboardingCard from "$lib/components/OnboardingCard.svelte";
   import RouteDrawTool from "$lib/components/RouteDrawTool.svelte";
   import AreaDrawTool from "$lib/components/AreaDrawTool.svelte";
+  import AutoTextarea from "$lib/components/AutoTextarea.svelte";
   import { boundsOfPolygons, shouldFlyTo } from "$lib/geo";
   import { getBetterGpsFix, type GpsFix } from "$lib/gps";
   import {
@@ -126,6 +127,15 @@
   let stoneSubmitting = $state(false);
   let stoneError = $state<string | null>(null);
   let stoneEditing = $state<Record<string, string>>({});
+  let showStoneForm = $state(false);
+
+  function openStoneForm() {
+    showStoneForm = true;
+  }
+  function closeStoneForm() {
+    clearStoneDraft();
+    showStoneForm = false;
+  }
   let routesOpen = $state(false);
   let routeEdits = $state<
     Record<
@@ -697,6 +707,7 @@
       }
 
       clearStoneDraft();
+      showStoneForm = false;
       await invalidateAll();
       await refreshBoundaryStones();
     } catch (e) {
@@ -1562,9 +1573,26 @@
               </ul>
             {/if}
 
+            {#if !showStoneForm}
+              <button
+                class="inline-flex items-center justify-center gap-2 px-3 py-2.5 min-h-[42px] rounded-pill text-ink border bg-surface-muted font-semibold text-xs hover:border-pine self-start"
+                onclick={openStoneForm}
+              >
+                <Plus size="1.125em" weight="bold" />
+                <span>Grenzstein hinzufügen</span>
+              </button>
+            {:else}
             <div
-              class="border border-dashed border-hairline rounded-btn p-4 flex flex-col gap-3"
+              class="relative border border-dashed border-hairline rounded-btn p-4 pr-12 flex flex-col gap-3"
             >
+              <button
+                type="button"
+                aria-label="Abbrechen"
+                class="absolute top-2 right-2 w-9 h-9 grid place-items-center rounded-btn border bg-surface text-content hover:border-pine hover:text-ink transition"
+                onclick={closeStoneForm}
+              >
+                <X size="1em" weight="bold" />
+              </button>
               <span class="eyebrow">Neuer Grenzstein</span>
               {#if stoneError}
                 <div
@@ -1612,12 +1640,11 @@
                 </div>
               {/if}
 
-              <textarea
-                class="w-full px-3 py-2 min-h-[64px] rounded-btn border bg-surface text-[0.9rem] text-ink focus:outline-none focus:border-pine focus:shadow-ring-focus transition"
-                rows="2"
-                placeholder="Beschreibung (z. B. Lage, Markierungen)"
+              <AutoTextarea
                 bind:value={stoneDescription}
-              ></textarea>
+                initialLines={2}
+                placeholder="Beschreibung (z. B. Lage, Markierungen)"
+              />
 
               <label
                 class="flex items-center gap-2 text-xs text-content cursor-pointer"
@@ -1650,6 +1677,7 @@
                 {/if}
               </div>
             </div>
+            {/if}
           </div>
 
           <!-- Aktionen -->

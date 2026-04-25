@@ -1,7 +1,7 @@
 <script lang="ts">
   import type { PageData } from './$types';
   import { invalidateAll } from '$app/navigation';
-  import { ArrowLeft, Tree, MapPin, Camera, Polygon, PencilSimple, Trash, Plus, MapTrifold } from 'phosphor-svelte';
+  import { ArrowLeft, Tree, MapPin, Camera, Polygon, PencilSimple, Trash, Plus, MapTrifold, X } from 'phosphor-svelte';
   import { renamePlot, deletePlot } from '../../plots.remote';
   import { createBoundaryStone, deleteBoundaryStone, updateBoundaryStone } from '../../boundary-stones.remote';
   import { getBetterGpsFix, type GpsFix } from '$lib/gps';
@@ -17,6 +17,16 @@
   let stoneSubmitting = $state(false);
   let stoneError = $state<string | null>(null);
   let editing = $state<Record<string, string>>({});
+  let showStoneForm = $state(false);
+
+  function openStoneForm() {
+    showStoneForm = true;
+  }
+
+  function closeStoneForm() {
+    clearStoneDraft();
+    showStoneForm = false;
+  }
 
   async function rename() {
     const name = prompt('Name', data.plot.name ?? '');
@@ -119,6 +129,7 @@
       }
 
       clearStoneDraft();
+      showStoneForm = false;
       await invalidateAll();
     } finally {
       stoneSubmitting = false;
@@ -292,7 +303,24 @@
       {/if}
 
       <!-- Add new -->
-      <div class="border border-dashed border-hairline rounded-btn p-4 flex flex-col gap-3">
+      {#if !showStoneForm}
+        <button
+          class="inline-flex items-center justify-center gap-2 px-3 py-2 min-h-[44px] rounded-btn bg-surface border text-ink text-sm font-semibold hover:border-pine transition self-start"
+          onclick={openStoneForm}
+        >
+          <Plus size="1em" weight="bold" />
+          Grenzstein hinzufügen
+        </button>
+      {:else}
+      <div class="relative border border-dashed border-hairline rounded-btn p-4 pr-12 flex flex-col gap-3">
+        <button
+          type="button"
+          aria-label="Abbrechen"
+          class="absolute top-2 right-2 w-9 h-9 grid place-items-center rounded-btn border bg-surface text-content hover:border-pine hover:text-ink transition"
+          onclick={closeStoneForm}
+        >
+          <X size="1em" weight="bold" />
+        </button>
         <span class="eyebrow">Neuer Grenzstein</span>
 
         {#if stoneError}
@@ -362,6 +390,7 @@
           {/if}
         </div>
       </div>
+      {/if}
     </section>
 
     <section class="paper px-5 py-5 flex flex-col gap-3">

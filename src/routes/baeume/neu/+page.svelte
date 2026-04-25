@@ -30,6 +30,43 @@
   let description = $state('');
   let estPlantedAt = $state('');
   let estPlantedAge = $state('');
+
+  function formatYmd(d: Date) {
+    const yyyy = d.getFullYear();
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const dd = String(d.getDate()).padStart(2, '0');
+    return `${yyyy}-${mm}-${dd}`;
+  }
+
+  function setPlantedAt(v: string) {
+    estPlantedAt = v;
+    if (!v) {
+      estPlantedAge = '';
+      return;
+    }
+    const d = new Date(v);
+    if (isNaN(d.getTime())) return;
+    const now = new Date();
+    let age = now.getFullYear() - d.getFullYear();
+    const m = now.getMonth() - d.getMonth();
+    if (m < 0 || (m === 0 && now.getDate() < d.getDate())) age--;
+    if (age < 0) age = 0;
+    estPlantedAge = String(age);
+  }
+
+  function setPlantedAge(v: string) {
+    estPlantedAge = v;
+    if (v === '') return;
+    const age = Number(v);
+    if (!Number.isFinite(age) || age < 0) return;
+    const existing = estPlantedAt ? new Date(estPlantedAt) : null;
+    const hasExisting = existing && !isNaN(existing.getTime());
+    const now = new Date();
+    const month = hasExisting ? existing.getMonth() : now.getMonth();
+    const day = hasExisting ? existing.getDate() : now.getDate();
+    const year = now.getFullYear() - age;
+    estPlantedAt = formatYmd(new Date(year, month, day));
+  }
   let images = $state<{ file: File; preview: string; width: number; height: number }[]>([]);
   let submitting = $state(false);
   let error = $state<string | null>(null);
@@ -371,7 +408,7 @@
           <input
             type="date"
             class="w-full px-4 py-3 min-h-[48px] rounded-btn border bg-earth text-[0.9375rem] text-ink focus:outline-none focus:border-pine focus:shadow-ring-focus transition"
-            bind:value={estPlantedAt}
+            bind:value={() => estPlantedAt, setPlantedAt}
           />
         </label>
         <label class="flex flex-col gap-2">
@@ -380,7 +417,7 @@
             type="number"
             min="0"
             class="w-full px-4 py-3 min-h-[48px] rounded-btn border bg-earth text-[0.9375rem] text-ink focus:outline-none focus:border-pine focus:shadow-ring-focus transition"
-            bind:value={estPlantedAge}
+            bind:value={() => estPlantedAge, setPlantedAge}
           />
         </label>
       </div>

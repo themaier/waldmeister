@@ -50,9 +50,9 @@
    ========================================================================= */
 @theme {
   /* ---------- Palette (Layer 1) ---------- */
-  --color-pine: #1f3d2c;
+  --color-pine: #2a5a3f;
   --color-pine-dark: #132318;
-  --color-pine-deep: #0b1610;
+  --color-pine-deep: #143425;
   --color-moss: #5d7a4a;
   --color-leaf: #7aa36a;
   --color-bark: #5a3d2b;
@@ -72,7 +72,7 @@
   --color-surface: var(--color-parchment);
   --color-surface-muted: var(--color-earth-200);
   --color-surface-strong: var(--color-earth-300);
-  --color-ink: var(--color-pine-deep);
+  --color-ink: #0b1610;
   --color-content: var(--color-pine-dark);
   --color-content-muted: rgba(19, 35, 24, 0.62);
   --color-content-faint: rgba(19, 35, 24, 0.42);

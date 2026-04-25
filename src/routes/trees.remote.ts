@@ -99,6 +99,43 @@ export const createTree = command('unchecked', async (raw: unknown) => {
   return { treeId: tree.id, uploads };
 });
 
+const updateSchema = z.object({
+  id: z.string().uuid(),
+  treeTypeId: z.enum(TREE_TYPES).optional(),
+  healthStatus: z.enum(HEALTH_STATUSES).optional(),
+  labels: z.array(z.enum(TREE_LABELS)).optional(),
+  estPlantedAt: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .nullable()
+    .optional(),
+  description: z.string().nullable().optional()
+});
+
+export const updateTree = command('unchecked', async (raw: unknown) => {
+  const { locals } = getRequestEvent();
+  if (!locals.user) throw error(401, 'Nicht angemeldet.');
+  const parsed = updateSchema.safeParse(raw);
+  if (!parsed.success) throw error(400, parsed.error.issues[0].message);
+  const { id, ...patch } = parsed.data;
+
+  const [owned] = await db
+    .select({ plotId: trees.plotId })
+    .from(trees)
+    .innerJoin(forestPlots, eq(trees.plotId, forestPlots.id))
+    .where(and(eq(trees.id, id), eq(forestPlots.ownerId, locals.user.id)))
+    .limit(1);
+  if (!owned) throw error(404, 'Baum nicht gefunden.');
+
+  if (Object.keys(patch).length === 0) return { ok: true };
+
+  await db.update(trees).set(patch).where(eq(trees.id, id));
+
+  void getPlotOverview(owned.plotId).refresh();
+
+  return { ok: true };
+});
+
 export const getPlotOverview = query(z.string().uuid(), async (plotId) => {
   const { locals } = getRequestEvent();
   if (!locals.user) throw error(401, 'Nicht angemeldet.');
