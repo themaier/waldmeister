@@ -12,7 +12,9 @@
 
 import { PNG } from 'pngjs';
 
-const ZOOM = 19;
+// Trace at a zoomed-out level so the fixed tile window covers large/long parcels.
+// Keeping this constant makes tracing predictable and keeps the code simple.
+const ZOOM = 17;
 const TILE = 256;
 const RETRY_RADII = [3, 6] as const;
 
@@ -20,16 +22,16 @@ type Pt = [number, number];
 
 class ParcelTooLargeError extends Error {}
 
-function lngLatToTilePx(lng: number, lat: number) {
-  const n = 2 ** ZOOM;
+function lngLatToTilePx(lng: number, lat: number, zoom: number) {
+  const n = 2 ** zoom;
   const latRad = (lat * Math.PI) / 180;
   const x = ((lng + 180) / 360) * n;
   const y = ((1 - Math.log(Math.tan(latRad) + 1 / Math.cos(latRad)) / Math.PI) / 2) * n;
   return { x, y };
 }
 
-function tilePxToLngLat(xt: number, yt: number) {
-  const n = 2 ** ZOOM;
+function tilePxToLngLat(xt: number, yt: number, zoom: number) {
+  const n = 2 ** zoom;
   const lng = (xt / n) * 360 - 180;
   const latRad = Math.atan(Math.sinh(Math.PI * (1 - (2 * yt) / n)));
   return { lng, lat: (latRad * 180) / Math.PI };
@@ -39,7 +41,7 @@ export async function tracePolygonAt(lng: number, lat: number): Promise<Pt[]> {
   let lastErr: unknown;
   for (const radius of RETRY_RADII) {
     try {
-      return await traceOnce(lng, lat, radius);
+      return await traceOnce(lng, lat, ZOOM, radius);
     } catch (e) {
       lastErr = e;
       if (e instanceof ParcelTooLargeError) {
@@ -52,9 +54,9 @@ export async function tracePolygonAt(lng: number, lat: number): Promise<Pt[]> {
   throw lastErr;
 }
 
-async function traceOnce(lng: number, lat: number, RADIUS: number): Promise<Pt[]> {
+async function traceOnce(lng: number, lat: number, ZOOM: number, RADIUS: number): Promise<Pt[]> {
   const SIZE = (RADIUS * 2 + 1) * TILE;
-  const center = lngLatToTilePx(lng, lat);
+  const center = lngLatToTilePx(lng, lat, ZOOM);
   const cx = Math.floor(center.x);
   const cy = Math.floor(center.y);
   const minTx = cx - RADIUS;
@@ -76,7 +78,18 @@ async function traceOnce(lng: number, lat: number, RADIUS: number): Promise<Pt[]
     }
   }
   await Promise.all(jobs);
-  console.log('[trace] tiles fetched', stats.fetched, 'failed', stats.failed, 'linePx', stats.linePixels);
+  console.log(
+    '[trace] zoom',
+    ZOOM,
+    'radius',
+    RADIUS,
+    'tiles fetched',
+    stats.fetched,
+    'failed',
+    stats.failed,
+    'linePx',
+    stats.linePixels
+  );
 
   if (stats.linePixels === 0) {
     throw new Error('Keine Parzellengrenzen im Tile-Bereich gefunden (Tiles leer?).');
@@ -103,7 +116,9 @@ async function traceOnce(lng: number, lat: number, RADIUS: number): Promise<Pt[]
 
   const fill = floodFill(lineMask, SIZE, SIZE, seed.x, seed.y);
   if (!fill) {
-    throw new ParcelTooLargeError('Parzellengrenze nicht vollständig im sichtbaren Bereich — bitte näher an die Mitte der Parzelle klicken.');
+    throw new ParcelTooLargeError(
+      'Parzellengrenze nicht vollständig im sichtbaren Bereich — größere Umgebung wird versucht.'
+    );
   }
   let fillPx = 0;
   for (let i = 0; i < fill.length; i++) if (fill[i]) fillPx++;
@@ -129,7 +144,7 @@ async function traceOnce(lng: number, lat: number, RADIUS: number): Promise<Pt[]
   if (simplified.length < 3) throw new Error('Zu wenige Eckpunkte erkannt.');
 
   const ring: Pt[] = simplified.map(([px, py]) => {
-    const ll = tilePxToLngLat(minTx + px / TILE, minTy + py / TILE);
+    const ll = tilePxToLngLat(minTx + px / TILE, minTy + py / TILE, ZOOM);
     return [ll.lng, ll.lat];
   });
   const first = ring[0];

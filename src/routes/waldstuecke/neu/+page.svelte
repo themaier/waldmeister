@@ -32,9 +32,9 @@
   let tracing = $state(false);
 
   const MIN_FETCH_ZOOM = 15;
-  // Below this zoom the raster tiles don't show the parcel outlines clearly
-  // enough for tracing, and the 7×7 window would cover a huge area.
-  const MIN_TRACE_ZOOM = 16;
+  // When zoomed far out we avoid fetching the whole viewport (too many parcels),
+  // but tracing a single parcel from raster tiles still works at any zoom.
+  const TRACE_FALLBACK_BBOX_HALF_SIZE_DEG = 0.0015;
 
   // --- Map layers -----------------------------------------------------------
 
@@ -114,24 +114,28 @@
       b.getNorth(),
     ];
     try {
-      const res = await parcelsInBbox({ bbox }).run();
-      for (const f of res.features) {
-        featureCache[f.cadastralId] = {
-          cadastralId: f.cadastralId,
-          geometry: f.geometry,
-          takenBy: f.takenBy,
-        };
-        if (f.takenBy && selection[f.cadastralId]) {
-          delete selection[f.cadastralId];
-        }
-      }
-      renderAlkis();
+      await fetchBbox(bbox);
     } catch (e) {
       loadError =
         e instanceof Error ?
           e.message
         : "Flurstücke konnten nicht geladen werden.";
     }
+  }
+
+  async function fetchBbox(bbox: [number, number, number, number]) {
+    const res = await parcelsInBbox({ bbox }).run();
+    for (const f of res.features) {
+      featureCache[f.cadastralId] = {
+        cadastralId: f.cadastralId,
+        geometry: f.geometry,
+        takenBy: f.takenBy,
+      };
+      if (f.takenBy && selection[f.cadastralId]) {
+        delete selection[f.cadastralId];
+      }
+    }
+    renderAlkis();
   }
 
   function scheduleFetch() {
@@ -170,8 +174,8 @@
       hits.length,
       "zoom=",
       mlMap.getZoom(),
-      "MIN_TRACE_ZOOM=",
-      MIN_TRACE_ZOOM
+      "MIN_FETCH_ZOOM=",
+      MIN_FETCH_ZOOM
     );
     if (hits.length > 0) {
       const cid = hits[0].properties?.cadastralId as string | undefined;
@@ -183,18 +187,18 @@
       return;
     }
 
-    if (mlMap.getZoom() < MIN_TRACE_ZOOM) {
-      loadError = "Zum Erkennen der Parzelle bitte näher heranzoomen.";
-      return;
-    }
-
     loadError = null;
     tracing = true;
     try {
       console.log("[neu] -> traceParcelAt");
       const { cadastralId } = await traceParcelAt({ lng: ev.lng, lat: ev.lat });
       console.log("[neu] traced cid=", cadastralId);
-      await fetchViewport();
+      if (mlMap.getZoom() >= MIN_FETCH_ZOOM) {
+        await fetchViewport();
+      } else {
+        const d = TRACE_FALLBACK_BBOX_HALF_SIZE_DEG;
+        await fetchBbox([ev.lng - d, ev.lat - d, ev.lng + d, ev.lat + d]);
+      }
       if (featureCache[cadastralId] && !featureCache[cadastralId].takenBy) {
         selection[cadastralId] = true;
       }
