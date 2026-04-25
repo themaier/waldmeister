@@ -135,7 +135,7 @@ export const actions: Actions = {
     try {
       parsed = schema.parse(JSON.parse(raw));
     } catch (err) {
-      return fail(400, { error: err instanceof z.ZodError ? err.errors[0].message : 'Ungültige Eingabe.' });
+      return fail(400, { error: err instanceof z.ZodError ? err.issues[0].message : 'Ungültige Eingabe.' });
     }
 
     // Resolve the selection into a tree-id list (scoped to the current user).
