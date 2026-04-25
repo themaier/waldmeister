@@ -157,14 +157,20 @@
     path = [pointToLngLat(e.clientX, e.clientY)];
     updatePreview(false);
     e.preventDefault();
+    e.stopPropagation();
   }
 
   function onPointerMove(e: PointerEvent) {
     if (!drawing) return;
-    if (pixelDistanceFromLast(e.clientX, e.clientY) < 2) return;
+    if (pixelDistanceFromLast(e.clientX, e.clientY) < 2) {
+      e.preventDefault();
+      e.stopPropagation();
+      return;
+    }
     path = [...path, pointToLngLat(e.clientX, e.clientY)];
     updatePreview(false);
     e.preventDefault();
+    e.stopPropagation();
   }
 
   function onPointerUp(e: PointerEvent) {
@@ -179,10 +185,14 @@
       // Tap/scribble too short — reset and stay in drawing mode.
       path = [];
       updatePreview(false);
+      e.preventDefault();
+      e.stopPropagation();
       return;
     }
     updatePreview(true);
     phase = 'form';
+    e.preventDefault();
+    e.stopPropagation();
   }
 
   $effect(() => {
@@ -198,20 +208,37 @@
     ];
     for (const h of handlers) h.disable();
 
+    const innerCanvas = mlMap.getCanvas();
     const prevTouchAction = canvas.style.touchAction;
+    const prevTouchActionInner = innerCanvas?.style.touchAction ?? '';
+    const prevOverscroll = canvas.style.overscrollBehavior;
+    const prevOverscrollInner = innerCanvas?.style.overscrollBehavior ?? '';
     canvas.style.touchAction = 'none';
+    canvas.style.overscrollBehavior = 'none';
+    if (innerCanvas) {
+      innerCanvas.style.touchAction = 'none';
+      innerCanvas.style.overscrollBehavior = 'none';
+    }
 
-    canvas.addEventListener('pointerdown', onPointerDown);
-    canvas.addEventListener('pointermove', onPointerMove);
-    canvas.addEventListener('pointerup', onPointerUp);
-    canvas.addEventListener('pointercancel', onPointerUp);
+    const ptrOpts: AddEventListenerOptions = { capture: true, passive: false };
+    canvas.addEventListener('pointerdown', onPointerDown, ptrOpts);
+    canvas.addEventListener('pointermove', onPointerMove, ptrOpts);
+    canvas.addEventListener('pointerup', onPointerUp, ptrOpts);
+    canvas.addEventListener('pointercancel', onPointerUp, ptrOpts);
 
     return () => {
-      canvas?.removeEventListener('pointerdown', onPointerDown);
-      canvas?.removeEventListener('pointermove', onPointerMove);
-      canvas?.removeEventListener('pointerup', onPointerUp);
-      canvas?.removeEventListener('pointercancel', onPointerUp);
-      if (canvas) canvas.style.touchAction = prevTouchAction;
+      canvas?.removeEventListener('pointerdown', onPointerDown, ptrOpts);
+      canvas?.removeEventListener('pointermove', onPointerMove, ptrOpts);
+      canvas?.removeEventListener('pointerup', onPointerUp, ptrOpts);
+      canvas?.removeEventListener('pointercancel', onPointerUp, ptrOpts);
+      if (canvas) {
+        canvas.style.touchAction = prevTouchAction;
+        canvas.style.overscrollBehavior = prevOverscroll;
+      }
+      if (innerCanvas) {
+        innerCanvas.style.touchAction = prevTouchActionInner;
+        innerCanvas.style.overscrollBehavior = prevOverscrollInner;
+      }
       for (const h of handlers) h.enable();
       clearPreview();
     };
