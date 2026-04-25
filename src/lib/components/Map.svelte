@@ -82,6 +82,7 @@
       },
       center: initialCenter,
       zoom: initialZoom,
+      maxZoom: 19,
       attributionControl: { compact: true }
     });
 
@@ -160,6 +161,22 @@
   }
   export function flyTo(center: [number, number], zoom: number) {
     map?.flyTo({ center, zoom, essential: true });
+  }
+  // Toggle every gesture handler in one call. Used by drawing tools that need
+  // exclusive control of the canvas (Anfahrt/Rückegasse freehand, area
+  // freehand) — see README §6.2 "Drawing-mode lock".
+  export function setInteractive(enabled: boolean) {
+    if (!map) return;
+    const handlers = [
+      map.dragPan,
+      map.scrollZoom,
+      map.doubleClickZoom,
+      map.touchZoomRotate,
+      map.boxZoom,
+      map.dragRotate,
+      map.keyboard
+    ];
+    for (const h of handlers) (enabled ? h.enable : h.disable).call(h);
   }
 </script>
 

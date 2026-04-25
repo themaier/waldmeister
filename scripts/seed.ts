@@ -1,9 +1,8 @@
-// Seed a demo user + a small Waldstück so you can poke at the app without
-// having to draw your first forest.
+// Seed a demo Waldstück so you can poke at the app without drawing a parcel.
 //
 //   bun run db:seed
 //
-// Login: demo@waldmeister.local / waldmeister
+// Register demo@waldmeister.local first if you want the data on the demo user.
 
 import postgres from 'postgres';
 
@@ -16,71 +15,97 @@ if (!url) {
 const sql = postgres(url);
 
 const EMAIL = 'demo@waldmeister.local';
-const PASSWORD_HASH =
-  // better-auth uses scrypt; we let the user sign in via /register instead to
-  // keep seed scripts free of crypto coupling. This seed only creates demo
-  // forest data once a user exists. So first: register at /register manually,
-  // then re-run `bun run db:seed` to attach demo data to that user.
-  null;
+const MOCK_PLOT_NAME = 'Unterreiner Forest';
+const MOCK_CADASTRAL_ID = 'MOCK-UNTERREINER-FOREST-001';
+
+// Irregular mock parcel matching the example coordinates from BayernAtlas.
+// Input order is latitude, longitude; GeoJSON/PostGIS stores longitude,
+// latitude in EPSG:4326.
+const mockRingWgs84: Array<[number, number]> = [
+  [12.99315, 48.26677],
+  [12.9942, 48.26695],
+  [12.99361, 48.26802],
+  [12.99305, 48.26892],
+  [12.99181, 48.26959],
+  [12.99002, 48.2704],
+  [12.98802, 48.27097],
+  [12.98762, 48.27083],
+  [12.98891, 48.27025],
+  [12.99044, 48.26961],
+  [12.99129, 48.26915],
+  [12.99184, 48.26847],
+  [12.99263, 48.26766],
+  [12.99275, 48.26709],
+  [12.99315, 48.26677]
+];
+const mockPolygonGeoJson = { type: 'Polygon', coordinates: [mockRingWgs84] };
 
 async function main() {
-  const [user] = await sql<{ id: string }[]>`SELECT id FROM "user" WHERE email = ${EMAIL} LIMIT 1`;
+  const [user] = await sql<{ id: string }[]>`
+    SELECT id
+    FROM "user"
+    WHERE email = ${EMAIL}
+    UNION ALL
+    SELECT id
+    FROM "user"
+    WHERE NOT EXISTS (SELECT 1 FROM "user" WHERE email = ${EMAIL})
+    ORDER BY id
+    LIMIT 1
+  `;
   if (!user) {
-    console.log(`No user with email ${EMAIL} yet.`);
-    console.log(`→ Register at http://localhost:3000/register with that email,`);
-    console.log(`  then re-run:  bun run db:seed`);
+    console.log('No user found.');
+    console.log(`→ Register at http://localhost:3000/register, then re-run: bun run db:seed`);
     await sql.end();
     return;
   }
 
-  // Idempotent: skip if the demo plot is already present.
-  const existing = await sql`SELECT id FROM forest_plots WHERE owner_id = ${user.id} AND name = 'Demo-Wald' LIMIT 1`;
+  const existing = await sql<{ id: string }[]>`
+    SELECT id
+    FROM forest_plots
+    WHERE owner_id = ${user.id}
+      AND name = ${MOCK_PLOT_NAME}
+    LIMIT 1
+  `;
   if (existing.length > 0) {
-    console.log('Demo-Wald already exists — nothing to do.');
+    console.log(`${MOCK_PLOT_NAME} already exists — plot id: ${existing[0].id}`);
     await sql.end();
     return;
   }
 
   const [{ id: plotId }] = await sql<{ id: string }[]>`
     INSERT INTO forest_plots (owner_id, name)
-    VALUES (${user.id}, 'Demo-Wald')
+    VALUES (${user.id}, ${MOCK_PLOT_NAME})
     RETURNING id
   `;
 
-  // One polygon somewhere near München.
-  const ring = [
-    [11.5, 48.14],
-    [11.51, 48.14],
-    [11.51, 48.145],
-    [11.5, 48.145],
-    [11.5, 48.14]
-  ];
-  await sql`
-    INSERT INTO parcels (plot_id, cadastral_id, geometry)
+  const [{ id: parcelId }] = await sql<{ id: string }[]>`
+    INSERT INTO parcels (cadastral_id, gemarkung, municipality, area_sqm, geometry, fetched_at)
     VALUES (
-      ${plotId},
-      'DEMO-001',
-      ST_SetSRID(ST_GeomFromGeoJSON(${JSON.stringify({ type: 'Polygon', coordinates: [ring] })}), 4326)
+      ${MOCK_CADASTRAL_ID},
+      'Unterreiner',
+      'Pocking',
+      ST_Area(ST_Transform(ST_SetSRID(ST_GeomFromGeoJSON(${JSON.stringify(mockPolygonGeoJson)}), 4326), 25832))::numeric(14, 2),
+      ST_SetSRID(ST_GeomFromGeoJSON(${JSON.stringify(mockPolygonGeoJson)}), 4326),
+      now()
     )
+    ON CONFLICT (cadastral_id) DO UPDATE SET
+      gemarkung = EXCLUDED.gemarkung,
+      municipality = EXCLUDED.municipality,
+      area_sqm = EXCLUDED.area_sqm,
+      geometry = EXCLUDED.geometry,
+      fetched_at = EXCLUDED.fetched_at
+    RETURNING id
   `;
 
-  // Scatter 6 trees inside.
-  const trees = [
-    { lat: 48.141, lng: 11.502, type: 'fichte', health: 'healthy' },
-    { lat: 48.142, lng: 11.504, type: 'fichte', health: 'must-watch' },
-    { lat: 48.143, lng: 11.503, type: 'tanne', health: 'infected' },
-    { lat: 48.144, lng: 11.505, type: 'eiche', health: 'healthy' },
-    { lat: 48.142, lng: 11.507, type: 'kiefer', health: 'dead' },
-    { lat: 48.141, lng: 11.506, type: 'buche', health: 'healthy' }
-  ];
-  for (const t of trees) {
-    await sql`
-      INSERT INTO trees (plot_id, latitude, longitude, gps_accuracy_m, tree_type_id, health_status, labels)
-      VALUES (${plotId}, ${t.lat}, ${t.lng}, 5, ${t.type}, ${t.health}, '{}')
-    `;
-  }
+  await sql`
+    INSERT INTO forest_plot_parcels (plot_id, parcel_id)
+    VALUES (${plotId}, ${parcelId})
+    ON CONFLICT DO NOTHING
+  `;
 
-  console.log(`✓ Seeded Demo-Wald (${plotId}) with ${trees.length} trees.`);
+  console.log(`✓ Seeded ${MOCK_PLOT_NAME}`);
+  console.log(`  plot id:  ${plotId}`);
+  console.log(`  parcel id: ${parcelId}`);
   await sql.end();
 }
 
