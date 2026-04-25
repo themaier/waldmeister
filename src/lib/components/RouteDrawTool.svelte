@@ -244,7 +244,6 @@
       mlMap.doubleClickZoom,
       mlMap.touchZoomRotate,
       mlMap.boxZoom,
-      mlMap.dragRotate,
     ];
     for (const h of gestureHandlers) h.disable();
 

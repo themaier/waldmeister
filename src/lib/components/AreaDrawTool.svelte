@@ -203,8 +203,7 @@
       mlMap.scrollZoom,
       mlMap.doubleClickZoom,
       mlMap.touchZoomRotate,
-      mlMap.boxZoom,
-      mlMap.dragRotate
+      mlMap.boxZoom
     ];
     for (const h of handlers) h.disable();
 

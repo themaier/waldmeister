@@ -86,6 +86,12 @@
       attributionControl: false
     });
 
+    // 2D-only map — disable pitch so the two-finger pitch handler can't
+    // compete with pinch-zoom (it occasionally swallows the gesture on
+    // mobile, especially when fingers don't move perfectly symmetrically).
+    map.touchPitch.disable();
+    map.dragRotate.disable();
+
     map.addControl(new maplibregl.NavigationControl({ visualizePitch: false }), 'top-right');
     map.addControl(
       new maplibregl.GeolocateControl({
@@ -102,9 +108,15 @@
     });
 
     // Long-press detection — MapLibre doesn't ship one, so we build it from
-    // touchstart + a 500 ms timer cancelled by move/end.
+    // pointerdown + a timer cancelled by move/end. Critically, we only arm
+    // the timer for *single-touch* gestures: if a second finger lands, we
+    // cancel immediately. Otherwise a slow pinch-zoom (especially pinch-in
+    // for zoom-out, where fingers move at a more leisurely pace before
+    // MapLibre's ~7% distance-change activation threshold) would fire the
+    // long-press → `onLongPress` callback → navigation, killing the gesture.
     let longPressTimer: ReturnType<typeof setTimeout> | null = null;
     let longPressLngLat: { lng: number; lat: number } | null = null;
+    const activePointers = new Set<number>();
     const PRESS_MS = 550;
     const canvas = map.getCanvasContainer();
 
@@ -130,20 +142,31 @@
 
     const onPointerDown = (e: PointerEvent) => {
       if (e.pointerType === 'mouse' && e.button !== 0) return;
+      activePointers.add(e.pointerId);
+      // Multi-touch (pinch / two-finger pan) — never long-press, and abort
+      // any in-flight timer started by the first finger.
+      if (activePointers.size > 1) {
+        cancelLongPress();
+        return;
+      }
       startLongPress(e.clientX, e.clientY);
     };
+    const onPointerEnd = (e: PointerEvent) => {
+      activePointers.delete(e.pointerId);
+      cancelLongPress();
+    };
     canvas.addEventListener('pointerdown', onPointerDown);
-    canvas.addEventListener('pointerup', cancelLongPress);
-    canvas.addEventListener('pointercancel', cancelLongPress);
-    canvas.addEventListener('pointerleave', cancelLongPress);
+    canvas.addEventListener('pointerup', onPointerEnd);
+    canvas.addEventListener('pointercancel', onPointerEnd);
+    canvas.addEventListener('pointerleave', onPointerEnd);
     map.on('movestart', cancelLongPress);
     map.on('zoomstart', cancelLongPress);
 
     return () => {
       canvas.removeEventListener('pointerdown', onPointerDown);
-      canvas.removeEventListener('pointerup', cancelLongPress);
-      canvas.removeEventListener('pointercancel', cancelLongPress);
-      canvas.removeEventListener('pointerleave', cancelLongPress);
+      canvas.removeEventListener('pointerup', onPointerEnd);
+      canvas.removeEventListener('pointercancel', onPointerEnd);
+      canvas.removeEventListener('pointerleave', onPointerEnd);
     };
   });
 
@@ -167,13 +190,14 @@
   // freehand) — see README §6.2 "Drawing-mode lock".
   export function setInteractive(enabled: boolean) {
     if (!map) return;
+    // Keep `dragRotate` and `touchPitch` permanently disabled — see onMount.
+    // Don't include them here so we never accidentally re-enable them.
     const handlers = [
       map.dragPan,
       map.scrollZoom,
       map.doubleClickZoom,
       map.touchZoomRotate,
       map.boxZoom,
-      map.dragRotate,
       map.keyboard
     ];
     for (const h of handlers) (enabled ? h.enable : h.disable).call(h);
