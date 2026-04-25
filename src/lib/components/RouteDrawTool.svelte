@@ -266,6 +266,31 @@
       innerCanvas.style.overscrollBehavior = "none";
     }
 
+    // Lock document scroll while the tool is mounted. Without this, dragging
+    // top→bottom on the map area still scrolls the page on mobile: the home
+    // page wraps the map in a scrollable shell, and the browser walks the
+    // ancestor chain to decide whether a touch may pan the page. Inline
+    // `touch-action: none` on the canvas isn't always enough — some mobile
+    // browsers still fall back to ancestor pan when MapLibre's gesture
+    // classes are removed (which `setInteractive(false)` does). Pinning the
+    // scrollY via `position: fixed` is the only reliable lock that survives
+    // this on iOS Safari and Android Chrome.
+    const html = document.documentElement;
+    const body = document.body;
+    const lockedScrollY = window.scrollY;
+    const prevHtmlOverflow = html.style.overflow;
+    const prevBodyPosition = body.style.position;
+    const prevBodyTop = body.style.top;
+    const prevBodyLeft = body.style.left;
+    const prevBodyRight = body.style.right;
+    const prevBodyWidth = body.style.width;
+    html.style.overflow = "hidden";
+    body.style.position = "fixed";
+    body.style.top = `-${lockedScrollY}px`;
+    body.style.left = "0";
+    body.style.right = "0";
+    body.style.width = "100%";
+
     // `passive: false` is required so `preventDefault()` actually blocks the
     // browser’s touch scroll; otherwise scroll direction wins and draw only
     // “works” along the axis that doesn’t scroll the page.
@@ -288,6 +313,13 @@
         innerCanvas.style.touchAction = prevTouchActionInner;
         innerCanvas.style.overscrollBehavior = prevOverscrollInner;
       }
+      html.style.overflow = prevHtmlOverflow;
+      body.style.position = prevBodyPosition;
+      body.style.top = prevBodyTop;
+      body.style.left = prevBodyLeft;
+      body.style.right = prevBodyRight;
+      body.style.width = prevBodyWidth;
+      window.scrollTo(0, lockedScrollY);
       for (const h of gestureHandlers) h.enable();
       clearPreview();
     });

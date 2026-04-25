@@ -25,38 +25,48 @@
       const r = svgRef!.getBoundingClientRect();
       if (r.width === 0 || r.height === 0) return;
       const scale = r.height / VIEW_H;
-      const sx = r.left + (PIVOT_X / VIEW_W) * r.width;
-      const sy = r.top + (PIVOT_Y / VIEW_H) * r.height;
-      const dx = (e.clientX - sx) / scale;
-      const dy = (e.clientY - sy) / scale;
 
-      let a1 = Math.atan2(dy, dx);
-      a1 = Math.max(-Math.PI / 2.2, Math.min(Math.PI / 2.2, a1));
-
-      const rightTarget = window.innerWidth * 1.06;
-      const ext = Math.max(0, Math.min(1, (e.clientX - sx) / Math.max(1, rightTarget - sx)));
-
-      const minD = Math.max(Math.abs(L1 - L2) + 8, 50);
-      const maxD = L1 + L2 - 4;
-      const d = minD + ext * (maxD - minD);
-
-      const cosShoulder = (L1 * L1 + d * d - L2 * L2) / (2 * L1 * d);
-      const cosElbow = (L1 * L1 + L2 * L2 - d * d) / (2 * L1 * L2);
-      const shoulderInner = Math.acos(Math.max(-1, Math.min(1, cosShoulder)));
-      const elbowInner = Math.acos(Math.max(-1, Math.min(1, cosElbow)));
-
-      shoulderDeg = ((a1 + shoulderInner) * 180) / Math.PI;
-      forearmDeg = (-(Math.PI - elbowInner) * 180) / Math.PI;
-
-      // Staff vertical bob — only when the mouse is over the left half of the
-      // mascot. The staff/hand translate together; pivot-less translation reads
-      // as "raising/lowering" the staff with the cursor.
+      // Split the figure at the right-shoulder pivot, not the viewbox center:
+      // any cursor left of the pivot has a negative dx and otherwise whips the
+      // upper arm backwards into the face. Left of pivot → staff bob only;
+      // right of pivot → pointing arm only.
       const vbX = ((e.clientX - r.left) / r.width) * VIEW_W;
       const vbY = ((e.clientY - r.top) / r.height) * VIEW_H;
-      if (vbX < 240) {
+      const onLeft = vbX < PIVOT_X;
+
+      if (onLeft) {
         staffY = Math.max(-70, Math.min(70, (vbY - 400) * 0.18));
       } else {
         staffY = 0;
+
+        const sx = r.left + (PIVOT_X / VIEW_W) * r.width;
+        const sy = r.top + (PIVOT_Y / VIEW_H) * r.height;
+        const dx = (e.clientX - sx) / scale;
+        const dy = (e.clientY - sy) / scale;
+
+        let a1 = Math.atan2(dy, dx);
+        a1 = Math.max(-Math.PI / 2.2, Math.min(Math.PI / 2.2, a1));
+
+        const rightTarget = window.innerWidth * 1.06;
+        const ext = Math.max(0, Math.min(1, (e.clientX - sx) / Math.max(1, rightTarget - sx)));
+
+        const minD = Math.max(Math.abs(L1 - L2) + 8, 50);
+        const maxD = L1 + L2 - 4;
+        const d = minD + ext * (maxD - minD);
+
+        const cosShoulder = (L1 * L1 + d * d - L2 * L2) / (2 * L1 * d);
+        const cosElbow = (L1 * L1 + L2 * L2 - d * d) / (2 * L1 * L2);
+        const shoulderInner = Math.acos(Math.max(-1, Math.min(1, cosShoulder)));
+        const elbowInner = Math.acos(Math.max(-1, Math.min(1, cosElbow)));
+
+        // Cap the upper-arm rotation between vertical-up (-90°) and
+        // vertical-down (90°). The IK math can otherwise resolve to angles
+        // past ±90° for cursor positions close to the shoulder — visually
+        // this folds the arm back into the head/face. Clamping on both sides
+        // keeps the upper arm in the natural side-pointing half-plane.
+        const rawShoulder = ((a1 + shoulderInner) * 180) / Math.PI;
+        shoulderDeg = Math.max(-90, Math.min(90, rawShoulder));
+        forearmDeg = (-(Math.PI - elbowInner) * 180) / Math.PI;
       }
     };
     window.addEventListener('mousemove', onMove, { passive: true });
