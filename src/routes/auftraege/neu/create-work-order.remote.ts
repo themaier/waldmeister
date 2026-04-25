@@ -22,7 +22,7 @@ const schema = z.object({
     plot_photos: z.boolean().default(true),
     areas: z.boolean().default(true),
     tree_photos: z.boolean().default(true),
-    tree_descriptions: z.boolean().default(false),
+    tree_descriptions: z.boolean().default(true),
     tree_health: z.boolean().default(true)
   })
 });

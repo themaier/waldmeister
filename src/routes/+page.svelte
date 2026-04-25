@@ -6,6 +6,7 @@
   import { onMount } from "svelte";
   import { goto } from "$app/navigation";
   import { invalidateAll } from "$app/navigation";
+  import { page } from "$app/state";
   import { activePlotStore } from "$lib/stores/active-plot.svelte";
   import Map from "$lib/components/Map.svelte";
   import PlotSwitcher from "$lib/components/PlotSwitcher.svelte";
@@ -52,11 +53,16 @@
   let { data }: { data: PageData & { plots: any[]; parcels: any[] } } =
     $props();
 
+  const treeNeuFromQs = $derived(
+    `&from=${encodeURIComponent(page.url.pathname + page.url.search)}`
+  );
+
   // Seed the session store from the load-resolved `?plot=ID` (set by the
   // Waldstück-creation redirect). Synchronous init — runs once on mount,
   // which matches the only entry path: a fresh navigation from /waldstuecke/neu.
   onMount(() => {
     if (data.requestedPlotId) activePlotStore.set(data.requestedPlotId);
+    else activePlotStore.hydrate();
   });
 
   let mapRef = $state<Map | undefined>();
@@ -902,7 +908,9 @@
     if (routeDrawType || areaDrawActive) return;
     if (placementMode) {
       placementMode = false;
-      goto(`/baeume/neu?plot=${activePlotId}&lat=${e.lat}&lng=${e.lng}`);
+      goto(
+        `/baeume/neu?plot=${activePlotId}&lat=${e.lat}&lng=${e.lng}${treeNeuFromQs}`
+      );
       return;
     }
     // Hit-test: did we click a parcel? MapLibre lets us query rendered features.
@@ -937,7 +945,9 @@
   function onLongPress(e: { lng: number; lat: number }) {
     if (!activePlotId) return;
     if (routeDrawType || areaDrawActive) return; // tool owns gestures
-    goto(`/baeume/neu?plot=${activePlotId}&lat=${e.lat}&lng=${e.lng}`);
+    goto(
+      `/baeume/neu?plot=${activePlotId}&lat=${e.lat}&lng=${e.lng}${treeNeuFromQs}`
+    );
   }
 
   function startPlacement() {
@@ -1030,7 +1040,7 @@
           return;
         }
         goto(
-          `/baeume/neu?plot=${plotId}&lat=${fix.lat}&lng=${fix.lng}&acc=${fix.acc}`
+          `/baeume/neu?plot=${plotId}&lat=${fix.lat}&lng=${fix.lng}&acc=${fix.acc}${treeNeuFromQs}`
         );
       })
       .finally(() => {

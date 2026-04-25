@@ -26,6 +26,16 @@ interface Visibility {
   tree_health: boolean;
 }
 
+/** Partial `share_visibility` JSON is merged with these defaults (full share). */
+const DEFAULT_SHARE_VISIBILITY: Visibility = {
+  anfahrten: true,
+  plot_photos: true,
+  areas: true,
+  tree_photos: true,
+  tree_descriptions: true,
+  tree_health: true
+};
+
 export const load: PageServerLoad = async ({ params }) => {
   const [order] = await db
     .select()
@@ -38,9 +48,12 @@ export const load: PageServerLoad = async ({ params }) => {
   }
   if (order.status === 'ARCHIVED') throw error(410, 'Auftrag archiviert.');
 
-  const vis = order.shareVisibility as Visibility;
+  const vis: Visibility = {
+    ...DEFAULT_SHARE_VISIBILITY,
+    ...(order.shareVisibility as Partial<Visibility>)
+  };
 
-  const wot = await db
+  const wotRaw = await db
     .select({
       id: workOrderTrees.id,
       status: workOrderTrees.status,
@@ -49,18 +62,41 @@ export const load: PageServerLoad = async ({ params }) => {
     })
     .from(workOrderTrees)
     .innerJoin(trees, eq(workOrderTrees.treeId, trees.id))
-    .where(eq(workOrderTrees.workOrderId, order.id));
+    .where(eq(workOrderTrees.workOrderId, order.id))
+    // Without ORDER BY, Postgres order is undefined and can change after row updates.
+    .orderBy(asc(trees.createdAt), asc(trees.id));
 
-  const treeIds = wot.map((w) => w.tree.id);
-  const plotIds = Array.from(new Set(wot.map((w) => w.tree.plotId)));
   const selection = order.selectionSnapshot as
     | { type: 'plot'; plotId: string }
     | { type: 'areas'; plotId: string; areaIds: string[] }
     | { type: 'trees'; treeIds: string[] };
+
+  const treeOrderPos =
+    selection.type === 'trees' && selection.treeIds.length > 0
+      ? new Map(selection.treeIds.map((id, i) => [id, i]))
+      : null;
+  const wot = treeOrderPos
+    ? [...wotRaw].sort(
+        (a, b) => (treeOrderPos.get(a.tree.id) ?? 1e9) - (treeOrderPos.get(b.tree.id) ?? 1e9)
+      )
+    : wotRaw;
+
+  const treeIds = wot.map((w) => w.tree.id);
   const selectedPlotId =
     selection.type === 'plot' || selection.type === 'areas'
       ? selection.plotId
-      : plotIds[0] ?? null;
+      : null;
+  const plotIdsFromTrees = [...new Set(wot.map((w) => w.tree.plotId).filter((id): id is string => !!id))];
+  // Flurstücke: prefer plots from trees; fall back to selection Waldstück (e.g. all trees in one plot).
+  const plotIds =
+    plotIdsFromTrees.length > 0
+      ? plotIdsFromTrees
+      : selectedPlotId
+        ? [selectedPlotId]
+        : wot[0]?.tree.plotId
+          ? [wot[0].tree.plotId]
+          : [];
+  const framingPlotId = selectedPlotId ?? plotIds[0] ?? null;
 
   const [imgs, routes, plotPhotos, areaRows, plotCenterRows] = await Promise.all([
     vis.tree_photos && treeIds.length
@@ -93,7 +129,7 @@ export const load: PageServerLoad = async ({ params }) => {
           .where(inArray(areas.plotId, plotIds))
       : []
     ,
-    selectedPlotId
+    framingPlotId
       ? db
           .select({
             plotId: forestPlotParcels.plotId,
@@ -103,7 +139,7 @@ export const load: PageServerLoad = async ({ params }) => {
           })
           .from(forestPlotParcels)
           .innerJoin(parcels, eq(parcels.id, forestPlotParcels.parcelId))
-          .where(eq(forestPlotParcels.plotId, selectedPlotId))
+          .where(eq(forestPlotParcels.plotId, framingPlotId))
           .groupBy(forestPlotParcels.plotId)
       : []
   ]);

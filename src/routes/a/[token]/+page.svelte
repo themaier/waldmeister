@@ -156,16 +156,18 @@
           class="paper px-5 py-4 flex flex-col gap-3 transition {t.status !== 'OPEN' ? 'opacity-80' : ''}"
         >
           <div class="flex items-start gap-3">
-            {#if t.images.length > 0}
-              <img
-                src={t.images[0].url}
-                alt=""
-                class="w-20 h-20 object-cover rounded-btn border flex-shrink-0"
-              />
-            {:else}
-              <div class="w-20 h-20 rounded-btn border border-dashed grid place-items-center text-content-faint bg-earth flex-shrink-0">
-                <Tree size="1.5em" />
-              </div>
+            {#if data.order.visibility.tree_photos}
+              {#if t.images.length > 0}
+                <img
+                  src={t.images[0].url}
+                  alt=""
+                  class="w-20 h-20 object-cover rounded-btn border flex-shrink-0"
+                />
+              {:else}
+                <div class="w-20 h-20 rounded-btn border border-dashed grid place-items-center text-content-faint bg-earth flex-shrink-0">
+                  <Tree size="1.5em" />
+                </div>
+              {/if}
             {/if}
 
             <div class="flex-1 min-w-0 flex flex-col gap-2">
