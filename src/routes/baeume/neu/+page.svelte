@@ -15,6 +15,7 @@
   import type { PageData } from './$types';
   import { untrack } from 'svelte';
   import { createTree } from '../../trees.remote';
+  import { getBetterGpsFix } from '$lib/gps';
 
   let { data }: { data: PageData } = $props();
 
@@ -32,6 +33,8 @@
   let images = $state<{ file: File; preview: string; width: number; height: number }[]>([]);
   let submitting = $state(false);
   let error = $state<string | null>(null);
+  let gpsCapturing = $state(false);
+  let cameraInputEl = $state<HTMLInputElement | null>(null);
 
   const lowAccuracy = $derived(gpsAccuracyM !== null && gpsAccuracyM > 10);
 
@@ -40,26 +43,39 @@
       error = 'GPS nicht verfügbar.';
       return;
     }
-    await new Promise<void>((resolve) => {
-      navigator.geolocation.getCurrentPosition(
-        (pos) => {
-          latitude = pos.coords.latitude;
-          longitude = pos.coords.longitude;
-          gpsAccuracyM = pos.coords.accuracy;
-          resolve();
-        },
-        (err) => {
-          error = `GPS-Fehler: ${err.message}`;
-          resolve();
-        },
-        { enableHighAccuracy: true, timeout: 10_000 }
-      );
-    });
+    gpsCapturing = true;
+    try {
+      const fix = await getBetterGpsFix({ minWaitMs: 3000, maxWaitMs: 7000, desiredAccuracyM: 10 });
+      if (!fix) {
+        error = 'GPS nicht verfügbar oder abgelehnt.';
+        return;
+      }
+      latitude = fix.lat;
+      longitude = fix.lng;
+      gpsAccuracyM = fix.acc;
+    } finally {
+      gpsCapturing = false;
+    }
   }
 
   async function addPhoto(e: Event) {
     const input = e.target as HTMLInputElement;
     if (!input.files) return;
+    // Capture GPS at photo time; wait at least 1s for a better fix.
+    // Fire-and-forget: we still accept the photo even if GPS fails.
+    if (!gpsCapturing) {
+      gpsCapturing = true;
+      getBetterGpsFix({ minWaitMs: 3000, maxWaitMs: 6500, desiredAccuracyM: 10 })
+        .then((fix) => {
+          if (!fix) return;
+          latitude = fix.lat;
+          longitude = fix.lng;
+          gpsAccuracyM = fix.acc;
+        })
+        .finally(() => {
+          gpsCapturing = false;
+        });
+    }
     for (const file of Array.from(input.files)) {
       const preview = URL.createObjectURL(file);
       const { width, height } = await imageSize(preview);
@@ -95,12 +111,18 @@
   async function submit() {
     error = null;
     if (latitude === null || longitude === null) {
-      error = 'Koordinaten fehlen.';
-      return;
+      await retakeGps(); // triggers permission prompt if needed
+      if (latitude === null || longitude === null) {
+        error = 'Koordinaten fehlen.';
+        return;
+      }
     }
     if (images.length === 0) {
-      error = 'Bitte mindestens ein Foto hinzufügen.';
-      return;
+      cameraInputEl?.click(); // triggers camera/picker prompt
+      if (images.length === 0) {
+        error = 'Bitte mindestens ein Foto hinzufügen.';
+        return;
+      }
     }
     submitting = true;
     try {
@@ -203,6 +225,9 @@
           >
             Position
           </h2>
+          {#if gpsCapturing}
+            <p class="text-xs font-semibold text-content-muted">GPS wird ermittelt …</p>
+          {/if}
           {#if latitude !== null && longitude !== null}
             <div class="inline-flex items-center gap-2 px-3 py-2 rounded-btn border border-dashed bg-earth font-mono text-[0.8125rem] text-content">
               <MapPin size="0.875em" weight="bold" />
@@ -259,20 +284,25 @@
             {/if}
           </div>
         {/each}
-        <label class="aspect-square rounded-btn border-2 border-dashed border-hairline grid place-items-center cursor-pointer text-content-muted hover:text-pine hover:border-pine hover:bg-surface-muted transition">
+        <button
+          type="button"
+          class="aspect-square rounded-btn border-2 border-dashed border-hairline grid place-items-center cursor-pointer text-content-muted hover:text-pine hover:border-pine hover:bg-surface-muted transition"
+          onclick={() => cameraInputEl?.click()}
+          aria-label="Foto aufnehmen"
+        >
           <div class="flex flex-col items-center gap-1">
             <Camera size="1.5em" weight="duotone" />
             <Plus size="1em" />
           </div>
-          <input
-            type="file"
-            accept="image/*"
-            capture="environment"
-            multiple
-            class="hidden"
-            onchange={addPhoto}
-          />
-        </label>
+        </button>
+        <input
+          bind:this={cameraInputEl}
+          type="file"
+          accept="image/*"
+          capture="environment"
+          class="hidden"
+          onchange={addPhoto}
+        />
       </div>
       <p class="text-xs text-content-muted">Das erste Foto dient als Cover.</p>
     </section>

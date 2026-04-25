@@ -206,10 +206,13 @@ export const actions: Actions = {
       })
       .returning({ id: workOrders.id });
 
-    await db
-      .insert(workOrderTrees)
-      .values(treeIds.map((id) => ({ workOrderId: order.id, treeId: id })));
+    // Drizzle throws on `values([])`. A plot can legitimately have 0 trees.
+    if (treeIds.length > 0) {
+      await db
+        .insert(workOrderTrees)
+        .values(treeIds.map((id) => ({ workOrderId: order.id, treeId: id })));
+    }
 
-    throw redirect(303, `/auftraege/${order.id}`);
+    throw redirect(303, '/auftraege');
   }
 };

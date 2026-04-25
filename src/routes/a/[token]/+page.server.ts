@@ -13,7 +13,7 @@ import {
   parcels,
   forestPlotParcels
 } from '$lib/server/db/schema';
-import { and, eq, inArray, asc } from 'drizzle-orm';
+import { and, eq, inArray, asc, sql } from 'drizzle-orm';
 import { geomToGeoJson } from '$lib/server/db/geo';
 import { presignDownload } from '$lib/server/s3';
 
@@ -53,8 +53,16 @@ export const load: PageServerLoad = async ({ params }) => {
 
   const treeIds = wot.map((w) => w.tree.id);
   const plotIds = Array.from(new Set(wot.map((w) => w.tree.plotId)));
+  const selection = order.selectionSnapshot as
+    | { type: 'plot'; plotId: string }
+    | { type: 'areas'; plotId: string; areaIds: string[] }
+    | { type: 'trees'; treeIds: string[] };
+  const selectedPlotId =
+    selection.type === 'plot' || selection.type === 'areas'
+      ? selection.plotId
+      : plotIds[0] ?? null;
 
-  const [imgs, routes, plotPhotos, areaRows] = await Promise.all([
+  const [imgs, routes, plotPhotos, areaRows, plotCenterRows] = await Promise.all([
     vis.tree_photos && treeIds.length
       ? db
           .select()
@@ -83,6 +91,20 @@ export const load: PageServerLoad = async ({ params }) => {
           })
           .from(areas)
           .where(inArray(areas.plotId, plotIds))
+      : []
+    ,
+    selectedPlotId
+      ? db
+          .select({
+            plotId: forestPlotParcels.plotId,
+            center: sql<string>`ST_AsGeoJSON(ST_PointOnSurface(ST_Union(${parcels.geometry})))`.as(
+              'center'
+            )
+          })
+          .from(forestPlotParcels)
+          .innerJoin(parcels, eq(parcels.id, forestPlotParcels.parcelId))
+          .where(eq(forestPlotParcels.plotId, selectedPlotId))
+          .groupBy(forestPlotParcels.plotId)
       : []
   ]);
 
@@ -119,6 +141,21 @@ export const load: PageServerLoad = async ({ params }) => {
     })
   );
 
+  const plotCenter =
+    plotCenterRows.length && plotCenterRows[0]?.center
+      ? (() => {
+          try {
+            const gj = JSON.parse(plotCenterRows[0].center) as {
+              type: 'Point';
+              coordinates: [number, number];
+            };
+            return gj?.type === 'Point' ? gj.coordinates : null;
+          } catch {
+            return null;
+          }
+        })()
+      : null;
+
   return {
     order: {
       id: order.id,
@@ -126,11 +163,9 @@ export const load: PageServerLoad = async ({ params }) => {
       instructions: order.instructions,
       status: order.status,
       visibility: vis,
-      selection: order.selectionSnapshot as
-        | { type: 'plot'; plotId: string }
-        | { type: 'areas'; plotId: string; areaIds: string[] }
-        | { type: 'trees'; treeIds: string[] }
+      selection
     },
+    plotCenter,
     trees: wot.map((w) => ({
       assignmentId: w.id,
       status: w.status,

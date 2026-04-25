@@ -39,6 +39,8 @@
     areas: AreaInput[];
     /** Flurstück geometries for the Waldstück — used to frame the full forest. */
     forestParcels?: ForestParcelInput[];
+    /** Point guaranteed inside the Waldstück (PostGIS point-on-surface). */
+    forestCenter?: [number, number] | null;
     /** Restrict highlighted area set; if null, every passed area is highlighted. */
     highlightedAreaIds?: string[] | null;
     class?: string;
@@ -49,6 +51,7 @@
     trees,
     areas,
     forestParcels = [],
+    forestCenter = null,
     highlightedAreaIds = null,
     class: klass = ''
   }: Props = $props();
@@ -388,6 +391,17 @@
   });
 
   export function fitForestView() {
+    if (!map) return;
+    if (forestCenter) {
+      map.resize();
+      map.easeTo({
+        center: forestCenter,
+        zoom: Math.max(map.getZoom(), 16),
+        duration: 650,
+        padding: FIT_PADDING
+      });
+      return;
+    }
     applyFramingFit(550);
   }
 </script>
