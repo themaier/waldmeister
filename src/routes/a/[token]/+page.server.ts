@@ -9,7 +9,9 @@ import {
   accessRoutes,
   plotImages,
   areas,
-  forestPlots
+  forestPlots,
+  parcels,
+  forestPlotParcels
 } from '$lib/server/db/schema';
 import { and, eq, inArray, asc } from 'drizzle-orm';
 import { geomToGeoJson } from '$lib/server/db/geo';
@@ -84,9 +86,21 @@ export const load: PageServerLoad = async ({ params }) => {
       : []
   ]);
 
-  const plotRows = plotIds.length
-    ? await db.select().from(forestPlots).where(inArray(forestPlots.id, plotIds))
-    : [];
+  const [plotRows, parcelRows] = await Promise.all([
+    plotIds.length ? db.select().from(forestPlots).where(inArray(forestPlots.id, plotIds)) : [],
+    plotIds.length
+      ? db
+          .select({
+            id: parcels.id,
+            plotId: forestPlotParcels.plotId,
+            cadastralId: parcels.cadastralId,
+            geometry: geomToGeoJson(parcels.geometry).as('geometry')
+          })
+          .from(forestPlotParcels)
+          .innerJoin(parcels, eq(parcels.id, forestPlotParcels.parcelId))
+          .where(inArray(forestPlotParcels.plotId, plotIds))
+      : []
+  ]);
 
   type TreeImg = (typeof imgs)[number];
   const imagesByTree = new Map<string, TreeImg[]>();
@@ -157,6 +171,12 @@ export const load: PageServerLoad = async ({ params }) => {
       ...a,
       geometry: typeof a.geometry === 'string' ? JSON.parse(a.geometry) : a.geometry
     })),
-    plots: plotRows
+    plots: plotRows,
+    plotParcels: parcelRows.map((r) => ({
+      plotId: r.plotId,
+      id: r.id,
+      cadastralId: r.cadastralId,
+      geometry: typeof r.geometry === 'string' ? JSON.parse(r.geometry) : r.geometry
+    }))
   };
 };

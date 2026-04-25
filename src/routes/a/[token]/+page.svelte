@@ -39,6 +39,8 @@
     }
   }
 
+  let contractorMapRef = $state<{ fitForestView: () => void } | null>(null);
+
   const healthPillClass: Record<HealthStatus, string> = {
     healthy: 'health-pill--healthy',
     'must-watch': 'health-pill--must-watch',
@@ -114,11 +116,21 @@
           Übersicht
         </h2>
         <ContractorTaskMap
+          bind:this={contractorMapRef}
           routes={data.routes}
           trees={data.trees}
           areas={data.areas}
+          forestParcels={data.plotParcels}
           highlightedAreaIds={data.order.selection?.type === 'areas' ? data.order.selection.areaIds : null}
         />
+        <button
+          type="button"
+          class="inline-flex items-center gap-2 px-3 py-2 min-h-[40px] rounded-btn border border-hairline bg-earth text-content font-semibold text-sm transition hover:border-pine self-start"
+          onclick={() => contractorMapRef?.fitForestView()}
+        >
+          <Tree size="1.125em" weight="bold" />
+          Zum Waldstück
+        </button>
         {#if data.routes.length > 0}
           <p class="text-xs text-content-muted leading-relaxed">
             Der hervorgehobene Weg führt am nächsten an die zu bearbeitenden Bäume bzw. Bereiche heran. Andere Wege sind abgedunkelt dargestellt.

@@ -52,15 +52,16 @@ export const createBoundaryStone = command('unchecked', async (raw: unknown) => 
     })
     .returning({ id: boundaryStones.id });
 
+  const contentType = (input.contentType && input.contentType.trim()) || 'image/jpeg';
   let uploadUrl = '';
   try {
-    uploadUrl = await presignUpload(key, input.contentType);
+    uploadUrl = await presignUpload(key, contentType);
   } catch (e) {
     console.warn('S3 presign failed (dev mode?):', (e as Error).message);
   }
 
   void getBoundaryStones(plot.id).refresh();
-  return { id: row.id, uploadUrl };
+  return { id: row.id, uploadUrl, contentType };
 });
 
 export const updateBoundaryStone = command(

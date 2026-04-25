@@ -10,6 +10,7 @@
   type LineString = { type: 'LineString'; coordinates: [number, number][] };
   type MultiLineString = { type: 'MultiLineString'; coordinates: [number, number][][] };
   type Polygon = { type: 'Polygon'; coordinates: [number, number][][] };
+  type MultiPolygon = { type: 'MultiPolygon'; coordinates: [number, number][][][] };
 
   interface RouteInput {
     id: string;
@@ -28,19 +29,41 @@
     geometry: Polygon | unknown;
   }
 
+  interface ForestParcelInput {
+    geometry: Polygon | MultiPolygon;
+  }
+
   interface Props {
     routes: RouteInput[];
     trees: TreeInput[];
     areas: AreaInput[];
+    /** Flurstück geometries for the Waldstück — used to frame the full forest. */
+    forestParcels?: ForestParcelInput[];
     /** Restrict highlighted area set; if null, every passed area is highlighted. */
     highlightedAreaIds?: string[] | null;
     class?: string;
   }
 
-  let { routes, trees, areas, highlightedAreaIds = null, class: klass = '' }: Props = $props();
+  let {
+    routes,
+    trees,
+    areas,
+    forestParcels = [],
+    highlightedAreaIds = null,
+    class: klass = ''
+  }: Props = $props();
 
   let containerEl: HTMLDivElement;
   let map: maplibregl.Map | null = null;
+  /**
+   * Camera framing: Waldstück parcels + Bäume/Bereiche.
+   * When Flurstück outlines exist, Anfahrts-Linien are excluded so a long route
+   * does not shove the Waldstück to the edge of the viewport.
+   */
+  let framingBounds: maplibregl.LngLatBounds | null = null;
+
+  /** Extra right inset — Navigation + Geolocate stack on `top-right`. */
+  const FIT_PADDING = { top: 48, bottom: 48, left: 48, right: 100 } as const;
 
   function flattenLine(p: unknown): [number, number][] {
     if (!p || typeof p !== 'object') return [];
@@ -94,17 +117,85 @@
     return best?.id ?? null;
   }
 
-  function buildBounds(): maplibregl.LngLatBounds | null {
+  function extendBoundsWithSurface(
+    b: maplibregl.LngLatBounds,
+    g: Polygon | MultiPolygon | undefined
+  ): boolean {
+    if (!g) return false;
+    let any = false;
+    if (g.type === 'Polygon') {
+      for (const ring of g.coordinates) for (const c of ring) {
+        b.extend(c as [number, number]);
+        any = true;
+      }
+    } else if (g.type === 'MultiPolygon') {
+      for (const poly of g.coordinates) for (const ring of poly) for (const c of ring) {
+        b.extend(c as [number, number]);
+        any = true;
+      }
+    }
+    return any;
+  }
+
+  function buildFramingBounds(): maplibregl.LngLatBounds | null {
     const b = new maplibregl.LngLatBounds();
     let any = false;
-    for (const t of trees) { b.extend([t.longitude, t.latitude]); any = true; }
-    for (const r of routes) for (const c of flattenLine(r.pathData)) { b.extend(c); any = true; }
+    let hasForestOutline = false;
+    for (const p of forestParcels) {
+      if (extendBoundsWithSurface(b, p.geometry)) {
+        any = true;
+        hasForestOutline = true;
+      }
+    }
+    for (const t of trees) {
+      b.extend([t.longitude, t.latitude]);
+      any = true;
+    }
     for (const a of areas) {
       const g = a.geometry as Polygon | undefined;
       if (!g || g.type !== 'Polygon') continue;
-      for (const ring of g.coordinates) for (const c of ring) { b.extend(c); any = true; }
+      for (const ring of g.coordinates) for (const c of ring) {
+        b.extend(c);
+        any = true;
+      }
+    }
+    if (!hasForestOutline) {
+      for (const r of routes) for (const c of flattenLine(r.pathData)) {
+        b.extend(c);
+        any = true;
+      }
     }
     return any ? b : null;
+  }
+
+  function applyFramingFit(duration: number) {
+    if (!map || !framingBounds) return;
+    map.resize();
+    map.fitBounds(framingBounds, { padding: FIT_PADDING, duration, maxZoom: 18 });
+  }
+
+  function addForestOutline() {
+    if (!map || forestParcels.length === 0) return;
+    const features = forestParcels.map((p, i) => ({
+      type: 'Feature' as const,
+      id: i,
+      geometry: p.geometry,
+      properties: {}
+    }));
+    map.addSource('forest-parcels', {
+      type: 'geojson',
+      data: { type: 'FeatureCollection', features }
+    });
+    map.addLayer({
+      id: 'forest-parcels-outline',
+      type: 'line',
+      source: 'forest-parcels',
+      paint: {
+        'line-color': '#166534',
+        'line-width': 2,
+        'line-opacity': 0.5
+      }
+    });
   }
 
   function addLayers() {
@@ -239,7 +330,7 @@
       (i) => `https://wmtsod${i}.bayernwolke.de/wmts/by_label/smerc/{z}/{x}/{y}`
     );
 
-    const bounds = buildBounds();
+    framingBounds = buildFramingBounds();
     map = new maplibregl.Map({
       container: containerEl,
       style: {
@@ -265,7 +356,9 @@
           { id: 'parzellarkarte', type: 'raster', source: 'parzellarkarte' }
         ]
       },
-      center: bounds ? bounds.getCenter().toArray() as [number, number] : [11.5, 48.5],
+      center: framingBounds
+        ? (framingBounds.getCenter().toArray() as [number, number])
+        : [11.5, 48.5],
       zoom: 14,
       maxZoom: 19,
       attributionControl: false
@@ -281,8 +374,11 @@
     );
 
     map.on('load', () => {
+      addForestOutline();
       addLayers();
-      if (bounds) map!.fitBounds(bounds, { padding: 40, duration: 0, maxZoom: 18 });
+      applyFramingFit(0);
+      // Container size can be wrong until layout + first tiles; refit once stable.
+      map!.once('idle', () => applyFramingFit(0));
     });
   });
 
@@ -290,6 +386,10 @@
     map?.remove();
     map = null;
   });
+
+  export function fitForestView() {
+    applyFramingFit(550);
+  }
 </script>
 
 <div bind:this={containerEl} class="map-surface w-full h-[55vh] min-h-[320px] rounded-btn overflow-hidden border {klass}"></div>

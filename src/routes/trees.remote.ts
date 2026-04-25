@@ -72,9 +72,10 @@ export const createTree = command('unchecked', async (raw: unknown) => {
     })
     .returning({ id: trees.id });
 
-  const uploads: { index: number; url: string }[] = [];
+  const uploads: { index: number; url: string; contentType: string }[] = [];
   for (let i = 0; i < input.images.length; i++) {
     const img = input.images[i];
+    const contentType = (img.contentType && img.contentType.trim()) || 'image/jpeg';
     const key = treeImageKey(locals.user.id, tree.id, crypto.randomUUID());
     await db.insert(treeImages).values({
       treeId: tree.id,
@@ -84,10 +85,10 @@ export const createTree = command('unchecked', async (raw: unknown) => {
       heightPx: img.heightPx
     });
     try {
-      uploads.push({ index: i, url: await presignUpload(key, img.contentType) });
+      uploads.push({ index: i, url: await presignUpload(key, contentType), contentType });
     } catch (e) {
       console.warn('S3 presign failed (dev mode?):', (e as Error).message);
-      uploads.push({ index: i, url: '' });
+      uploads.push({ index: i, url: '', contentType });
     }
   }
 
