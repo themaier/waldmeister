@@ -1,11 +1,13 @@
 <script lang="ts">
-  // Read-only overview map for the contractor share view (/a/[token]).
+  // Read-only overview map: contractor share (/a/[token]) and owner Auftrag detail (/auftraege/[id]).
   // Shows routes + assigned trees/areas, dims every route except the one
   // whose path comes closest to the work targets (the route the contractor
   // is most likely to actually use).
   import maplibregl from 'maplibre-gl';
   import { onMount, onDestroy } from 'svelte';
   import type { HealthStatus } from '$lib/enums';
+
+  type AssignmentStatus = 'OPEN' | 'COMPLETED' | 'NOT_FOUND' | 'PROBLEM';
 
   type LineString = { type: 'LineString'; coordinates: [number, number][] };
   type MultiLineString = { type: 'MultiLineString'; coordinates: [number, number][][] };
@@ -23,6 +25,8 @@
     latitude: number;
     longitude: number;
     healthStatus: HealthStatus | null;
+    /** Per-assignment status — marker colour follows this (not only health). */
+    status: AssignmentStatus;
   }
   interface AreaInput {
     id: string;
@@ -57,7 +61,9 @@
   }: Props = $props();
 
   let containerEl: HTMLDivElement;
-  let map: maplibregl.Map | null = null;
+  let map = $state<maplibregl.Map | null>(null);
+  /** True after `load` added sources/layers — tree `$effect` must not run before this. */
+  let mapStyleReady = $state(false);
   /**
    * Camera framing: Waldstück parcels + Bäume/Bereiche.
    * When Flurstück outlines exist, Anfahrts-Linien are excluded so a long route
@@ -67,6 +73,31 @@
 
   /** Extra right inset — Navigation + Geolocate stack on `top-right`. */
   const FIT_PADDING = { top: 48, bottom: 48, left: 48, right: 100 } as const;
+
+  /** Bäume with usable WGS84 coords (DB / JSON can surface strings or null). */
+  function treesOnMap(): TreeInput[] {
+    const out: TreeInput[] = [];
+    for (const t of trees) {
+      const lat = Number(t.latitude);
+      const lng = Number(t.longitude);
+      if (
+        !Number.isFinite(lat) ||
+        !Number.isFinite(lng) ||
+        Math.abs(lat) > 90 ||
+        Math.abs(lng) > 180
+      ) {
+        continue;
+      }
+      out.push({
+        id: t.id,
+        latitude: lat,
+        longitude: lng,
+        healthStatus: t.healthStatus,
+        status: t.status
+      });
+    }
+    return out;
+  }
 
   function flattenLine(p: unknown): [number, number][] {
     if (!p || typeof p !== 'object') return [];
@@ -90,7 +121,7 @@
   }
 
   function targetPoints(): [number, number][] {
-    const pts: [number, number][] = trees.map((t) => [t.longitude, t.latitude]);
+    const pts: [number, number][] = treesOnMap().map((t) => [t.longitude, t.latitude]);
     for (const a of areas) {
       const g = a.geometry as Polygon | undefined;
       if (!g || g.type !== 'Polygon' || !g.coordinates?.[0]?.length) continue;
@@ -150,7 +181,7 @@
         hasForestOutline = true;
       }
     }
-    for (const t of trees) {
+    for (const t of treesOnMap()) {
       b.extend([t.longitude, t.latitude]);
       any = true;
     }
@@ -177,28 +208,103 @@
     map.fitBounds(framingBounds, { padding: FIT_PADDING, duration, maxZoom: 18 });
   }
 
-  function addForestOutline() {
+  function buildForestFeatureCollection() {
+    return {
+      type: 'FeatureCollection' as const,
+      features: forestParcels.map((p, i) => ({
+        type: 'Feature' as const,
+        id: i,
+        geometry: p.geometry,
+        properties: {}
+      }))
+    };
+  }
+
+  /** Waldstück Flurstücke: subtle fill under work layers, strong outline on top (readable on DOP). */
+  function addForestParcelLayers() {
     if (!map || forestParcels.length === 0) return;
-    const features = forestParcels.map((p, i) => ({
-      type: 'Feature' as const,
-      id: i,
-      geometry: p.geometry,
-      properties: {}
-    }));
+    if (map.getSource('forest-parcels')) return;
+
     map.addSource('forest-parcels', {
       type: 'geojson',
-      data: { type: 'FeatureCollection', features }
+      data: buildForestFeatureCollection()
     });
+    map.addLayer({
+      id: 'forest-parcels-fill',
+      type: 'fill',
+      source: 'forest-parcels',
+      paint: {
+        'fill-color': '#0f4c2c',
+        'fill-opacity': 0.15
+      }
+    });
+  }
+
+  function addForestParcelOutlineOnTop() {
+    if (!map || !map.getSource('forest-parcels')) return;
+    if (map.getLayer('forest-parcels-outline')) return;
     map.addLayer({
       id: 'forest-parcels-outline',
       type: 'line',
       source: 'forest-parcels',
       paint: {
-        'line-color': '#166534',
-        'line-width': 2,
-        'line-opacity': 0.5
+        'line-color': '#f97316',
+        'line-width': 4,
+        'line-opacity': 0.95
       }
     });
+  }
+
+  function buildTreeCollection() {
+    const list = treesOnMap();
+    return {
+      type: 'FeatureCollection' as const,
+      features: list.map((t, i) => ({
+        type: 'Feature' as const,
+        geometry: { type: 'Point' as const, coordinates: [t.longitude, t.latitude] },
+        properties: {
+          id: t.id,
+          health: t.healthStatus ?? 'healthy',
+          status: t.status,
+          label: String(i + 1).padStart(2, '0')
+        }
+      }))
+    };
+  }
+
+  function syncTaskTreesSource() {
+    const m = map;
+    if (!m) return;
+    const src = m.getSource('task-trees') as maplibregl.GeoJSONSource | undefined;
+    if (!src) return;
+    src.setData(buildTreeCollection());
+  }
+
+  /** OPEN → health; otherwise → assignment status (README §6.6). */
+  function treeCircleColorExpression(): maplibregl.ExpressionSpecification {
+    const byHealth: maplibregl.ExpressionSpecification = [
+      'match',
+      ['get', 'health'],
+      'healthy',
+      getCss('--health-healthy', '#5d7a4a'),
+      'must-watch',
+      getCss('--health-must-watch', '#d97706'),
+      'infected',
+      getCss('--health-infected', '#b45309'),
+      'dead',
+      getCss('--health-dead', '#78716c'),
+      getCss('--health-healthy', '#5d7a4a')
+    ];
+    return [
+      'case',
+      ['==', ['get', 'status'], 'COMPLETED'],
+      getCss('--color-pine-deep', '#0f4c2c'),
+      ['==', ['get', 'status'], 'PROBLEM'],
+      getCss('--color-amber', '#d97706'),
+      ['==', ['get', 'status'], 'NOT_FOUND'],
+      getCss('--color-stone', '#78716c'),
+      byHealth
+    ];
   }
 
   function addLayers() {
@@ -286,37 +392,41 @@
       }
     });
 
-    // Trees — coloured by health.
-    map.addSource('task-trees', {
-      type: 'geojson',
-      data: {
-        type: 'FeatureCollection',
-        features: trees.map((t) => ({
-          type: 'Feature',
-          geometry: { type: 'Point', coordinates: [t.longitude, t.latitude] },
-          properties: { id: t.id, health: t.healthStatus ?? 'healthy' }
-        }))
-      }
-    });
+    // Trees — numbered, coloured by assignment status (OPEN still uses health).
+    map.addSource('task-trees', { type: 'geojson', data: buildTreeCollection() });
     map.addLayer({
       id: 'task-trees-circles',
       type: 'circle',
       source: 'task-trees',
       paint: {
-        'circle-radius': 6,
-        'circle-color': [
-          'match',
-          ['get', 'health'],
-          'healthy', getCss('--health-healthy', '#15803d'),
-          'must-watch', getCss('--health-must-watch', '#ca8a04'),
-          'infected', getCss('--health-infected', '#b45309'),
-          'dead', getCss('--health-dead', '#7f1d1d'),
-          '#15803d'
-        ],
+        'circle-radius': 9,
+        'circle-color': treeCircleColorExpression(),
         'circle-stroke-color': '#ffffff',
-        'circle-stroke-width': 1.5
+        'circle-stroke-width': 2
       }
     });
+    // Glyphs must exist on `glyphs` URL — Semibold stack often 404s on demotiles; a bad symbol layer can break the style.
+    try {
+      map.addLayer({
+        id: 'task-trees-labels',
+        type: 'symbol',
+        source: 'task-trees',
+        layout: {
+          'text-field': ['get', 'label'],
+          'text-size': 12,
+          'text-font': ['Open Sans Regular', 'Arial Unicode MS Regular'],
+          'text-allow-overlap': true,
+          'text-ignore-placement': true
+        },
+        paint: {
+          'text-color': '#ffffff',
+          'text-halo-color': 'rgba(0,0,0,0.55)',
+          'text-halo-width': 1.25
+        }
+      });
+    } catch {
+      /* numbered labels optional */
+    }
   }
 
   function getCss(name: string, fallback: string): string {
@@ -334,7 +444,7 @@
     );
 
     framingBounds = buildFramingBounds();
-    map = new maplibregl.Map({
+    const instance = new maplibregl.Map({
       container: containerEl,
       style: {
         version: 8,
@@ -357,7 +467,9 @@
         layers: [
           { id: 'base', type: 'raster', source: 'base' },
           { id: 'parzellarkarte', type: 'raster', source: 'parzellarkarte' }
-        ]
+        ],
+        // Same as `Map.svelte` — required for tree index labels on the symbol layer.
+        glyphs: 'https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf'
       },
       center: framingBounds
         ? (framingBounds.getCenter().toArray() as [number, number])
@@ -366,8 +478,9 @@
       maxZoom: 19,
       attributionControl: false
     });
-    map.addControl(new maplibregl.NavigationControl({ visualizePitch: false }), 'top-right');
-    map.addControl(
+    map = instance;
+    instance.addControl(new maplibregl.NavigationControl({ visualizePitch: false }), 'top-right');
+    instance.addControl(
       new maplibregl.GeolocateControl({
         positionOptions: { enableHighAccuracy: true },
         trackUserLocation: false,
@@ -376,18 +489,38 @@
       'top-right'
     );
 
-    map.on('load', () => {
-      addForestOutline();
+    instance.on('load', () => {
+      addForestParcelLayers();
       addLayers();
+      addForestParcelOutlineOnTop();
+      mapStyleReady = true;
+      syncTaskTreesSource();
       applyFramingFit(0);
       // Container size can be wrong until layout + first tiles; refit once stable.
-      map!.once('idle', () => applyFramingFit(0));
+      instance.once('idle', () => applyFramingFit(0));
     });
   });
 
   onDestroy(() => {
     map?.remove();
     map = null;
+    mapStyleReady = false;
+  });
+
+  $effect(() => {
+    // Re-sync when revalidated page data changes (e.g. contractor marks a tree).
+    trees;
+    if (!mapStyleReady) return;
+    syncTaskTreesSource();
+  });
+
+  $effect(() => {
+    forestParcels;
+    mapStyleReady;
+    if (!mapStyleReady) return;
+    const src = map?.getSource('forest-parcels') as maplibregl.GeoJSONSource | undefined;
+    if (!src) return;
+    src.setData(buildForestFeatureCollection());
   });
 
   export function fitForestView() {

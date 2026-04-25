@@ -47,12 +47,16 @@
       ? `${activeIndex + 1}/${plots.length}`
       : ''
   );
-  // Baum creation needs a plot context — disable when there isn't one.
-  const baumHref = $derived(activeId ? `/baeume/neu?plot=${activeId}` : null);
   const initial = $derived(
     (userName || '').trim().slice(0, 1).toUpperCase() || 'W'
   );
   const fromHref = $derived.by(() => `${page.url.pathname}${page.url.search}`);
+  // Baum creation needs a plot context — disable when there isn't one.
+  const baumHref = $derived(
+    activeId
+      ? `/baeume/neu?plot=${activeId}&from=${encodeURIComponent(fromHref)}`
+      : null
+  );
 
   function prev() {
     if (!hasMultiple) return;

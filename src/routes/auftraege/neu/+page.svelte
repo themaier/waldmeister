@@ -28,7 +28,7 @@
     plot_photos: true,
     areas: true,
     tree_photos: true,
-    tree_descriptions: false,
+    tree_descriptions: true,
     tree_health: true
   });
 
@@ -43,7 +43,14 @@
   function applyPreset(p: typeof preset) {
     preset = p;
     if (p === 'standard') {
-      vis = { anfahrten: true, plot_photos: true, areas: true, tree_photos: true, tree_descriptions: false, tree_health: true };
+      vis = {
+        anfahrten: true,
+        plot_photos: true,
+        areas: true,
+        tree_photos: true,
+        tree_descriptions: true,
+        tree_health: true
+      };
     } else if (p === 'minimal') {
       vis = { anfahrten: true, plot_photos: false, areas: false, tree_photos: false, tree_descriptions: false, tree_health: false };
     }

@@ -9,12 +9,24 @@
     type Priority,
     type WorkOrderStatus
   } from '$lib/enums';
-  import { ArrowLeft, Copy, Link as LinkIcon, Check, CaretDown, WhatsappLogo, Clock, Prohibit } from 'phosphor-svelte';
+  import { ArrowLeft, Copy, Link as LinkIcon, Check, CaretDown, WhatsappLogo, Clock, Prohibit, Tree } from 'phosphor-svelte';
   import { patchWorkOrder } from '../../work-orders.remote';
+  import ContractorTaskMap from '$lib/components/ContractorTaskMap.svelte';
 
   let { data }: { data: PageData } = $props();
 
   let copied = $state(false);
+  let auftragMapRef = $state<{ fitForestView: () => void } | null>(null);
+
+  const taskMapTrees = $derived(
+    data.trees.map((t) => ({
+      id: t.treeId,
+      latitude: Number(t.latitude),
+      longitude: Number(t.longitude),
+      healthStatus: t.healthStatus,
+      status: t.status
+    }))
+  );
 
   async function copyLink() {
     await navigator.clipboard.writeText(data.shareUrl);
@@ -261,11 +273,39 @@
       </div>
     </section>
 
+    {#if data.trees.length > 0}
+      <section class="paper px-5 py-5 flex flex-col gap-3">
+        <h2
+          class="font-serif font-medium text-[1.0625rem] tracking-tight text-ink m-0 section-numeral"
+          data-num="04"
+          style="font-variation-settings: 'opsz' 96, 'SOFT' 40, 'WONK' 1;"
+        >
+          Karte
+        </h2>
+        <ContractorTaskMap
+          bind:this={auftragMapRef}
+          routes={data.routes}
+          trees={taskMapTrees}
+          areas={[]}
+          forestParcels={data.plotParcels}
+          forestCenter={data.plotCenter}
+        />
+        <button
+          type="button"
+          class="inline-flex items-center gap-2 px-3 py-2 min-h-[40px] rounded-btn border border-hairline bg-earth text-content font-semibold text-sm transition hover:border-pine self-start"
+          onclick={() => auftragMapRef?.fitForestView()}
+        >
+          <Tree size="1.125em" weight="bold" />
+          Zum Waldstück
+        </button>
+      </section>
+    {/if}
+
     <!-- Trees -->
     <section class="paper px-5 py-5 flex flex-col gap-3">
       <h2
         class="font-serif font-medium text-[1.0625rem] tracking-tight text-ink m-0 section-numeral"
-        data-num="04"
+        data-num="05"
         style="font-variation-settings: 'opsz' 96, 'SOFT' 40, 'WONK' 1;"
       >
         Bäume im Auftrag

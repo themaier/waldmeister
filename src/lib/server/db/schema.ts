@@ -306,7 +306,7 @@ export const workOrders = pgTable('work_orders', {
     "plot_photos": true,
     "areas": true,
     "tree_photos": true,
-    "tree_descriptions": false,
+    "tree_descriptions": true,
     "tree_health": true
   }'::jsonb`),
   createdAt: timestamp('created_at').notNull().defaultNow(),

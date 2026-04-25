@@ -1,5 +1,8 @@
 <script lang="ts">
+  import { onMount } from 'svelte';
   import { goto } from '$app/navigation';
+  import { page } from '$app/state';
+  import { activePlotStore } from '$lib/stores/active-plot.svelte';
   import { Camera, MapPin, Crosshair, Trash, Plus } from 'phosphor-svelte';
   import Map from '$lib/components/Map.svelte';
   import maplibregl from 'maplibre-gl';
@@ -18,8 +21,13 @@
   import { untrack } from 'svelte';
   import { createTree } from '../../trees.remote';
   import { getBetterGpsFix } from '$lib/gps';
+  import { boundsOfPolygons } from '$lib/geo';
 
   let { data }: { data: PageData } = $props();
+
+  onMount(() => {
+    activePlotStore.set(data.plot.id);
+  });
 
   // untrack: form fields take the initial load value once and are then edited
   // locally — resyncing to data changes would clobber the user's input.
@@ -94,10 +102,68 @@
   let mapRef = $state<{ instance: () => maplibregl.Map | null } | null>(null);
   let marker = $state<maplibregl.Marker | null>(null);
   let uncertaintyLayerReady = $state(false);
+  let plotBoundsFittedOnce = $state(false);
 
   const UNCERTAINTY_SOURCE_ID = 'gps-uncertainty';
   const UNCERTAINTY_FILL_LAYER_ID = 'gps-uncertainty-fill';
   const UNCERTAINTY_OUTLINE_LAYER_ID = 'gps-uncertainty-outline';
+
+  const PLOT_PARCEL_SOURCE_ID = 'tree-neu-plot-parcels';
+  const PLOT_PARCEL_FILL_LAYER_ID = 'tree-neu-plot-parcels-fill';
+  const PLOT_PARCEL_LINE_LAYER_ID = 'tree-neu-plot-parcels-line';
+
+  function plotParcelFeatures() {
+    return data.plotParcels.map((p) => ({
+      type: 'Feature' as const,
+      id: p.id,
+      geometry: p.geometry,
+      properties: {}
+    }));
+  }
+
+  function tryAddPlotParcels(map: maplibregl.Map) {
+    if (!map.isStyleLoaded()) return;
+    if (!data.plotParcels.length) return;
+    if (map.getSource(PLOT_PARCEL_SOURCE_ID)) return;
+
+    map.addSource(PLOT_PARCEL_SOURCE_ID, {
+      type: 'geojson',
+      data: { type: 'FeatureCollection', features: plotParcelFeatures() }
+    });
+    map.addLayer({
+      id: PLOT_PARCEL_FILL_LAYER_ID,
+      type: 'fill',
+      source: PLOT_PARCEL_SOURCE_ID,
+      paint: {
+        'fill-color': '#0f4c2c',
+        'fill-opacity': 0.1
+      }
+    });
+    map.addLayer({
+      id: PLOT_PARCEL_LINE_LAYER_ID,
+      type: 'line',
+      source: PLOT_PARCEL_SOURCE_ID,
+      paint: {
+        'line-color': '#f97316',
+        'line-width': 3,
+        'line-opacity': 0.92
+      }
+    });
+
+    if (!plotBoundsFittedOnce && latitude === null && longitude === null) {
+      const polys = data.plotParcels
+        .map((p) => p.geometry)
+        .filter(
+          (g): g is GeoJSON.Polygon | GeoJSON.MultiPolygon =>
+            !!g && (g.type === 'Polygon' || g.type === 'MultiPolygon')
+        );
+      const b = boundsOfPolygons(polys);
+      if (b) {
+        map.fitBounds(b, { padding: 48, duration: 0 });
+        plotBoundsFittedOnce = true;
+      }
+    }
+  }
 
   function geodesicCirclePolygon(lng: number, lat: number, radiusM: number, points = 64) {
     const earth = 6378137;
@@ -331,8 +397,18 @@
           return;
         }
       }
-      // After creating, return to the overview so the user can continue capturing.
-      await goto(`/`);
+      // Return to the map (or other caller via ?from=) and refresh list data.
+      const from = page.url.searchParams.get('from');
+      let target =
+        from && from.startsWith('/') && !from.startsWith('//') ? from : '/';
+      // A nested `from` (e.g. opening Baum anlegen twice) can point at this
+      // route — never use that as the post-save destination.
+      if (target === '/baeume/neu' || target.startsWith('/baeume/neu?')) {
+        target = '/';
+      }
+      activePlotStore.persistSessionPlot(data.plot.id);
+      await goto(target, { replaceState: true, invalidateAll: true });
+      activePlotStore.set(data.plot.id);
     } finally {
       submitting = false;
     }
@@ -354,6 +430,7 @@
     }
 
     const ensureUncertaintyLayer = () => {
+      tryAddPlotParcels(map);
       if (uncertaintyLayerReady || !map.isStyleLoaded()) return;
       if (!map.getSource(UNCERTAINTY_SOURCE_ID)) {
         map.addSource(UNCERTAINTY_SOURCE_ID, {
@@ -407,6 +484,7 @@
         });
       }
     } else {
+      tryAddPlotParcels(map);
       updateUncertainty();
     }
 
@@ -419,6 +497,14 @@
         if (!gpsCapturing) map.flyTo({ center: [longitude, latitude], zoom: map.getZoom(), essential: true });
       }
     }
+  });
+
+  $effect(() => {
+    data.plotParcels;
+    const map = mapRef?.instance();
+    const src = map?.getSource(PLOT_PARCEL_SOURCE_ID) as maplibregl.GeoJSONSource | undefined;
+    if (!src || !data.plotParcels.length) return;
+    src.setData({ type: 'FeatureCollection', features: plotParcelFeatures() });
   });
 
   // Auto-start GPS once if the user arrived without coordinates.
@@ -458,6 +544,7 @@
         </h1>
       </div>
       <button
+        type="button"
         class="px-4 py-2 min-h-[40px] rounded-btn text-earth border font-semibold text-sm shadow-duff transition hover:-translate-y-px hover:shadow-understory disabled:opacity-70 disabled:cursor-not-allowed"
         style="background: linear-gradient(180deg, var(--color-pine), var(--color-pine-deep)); border-color: var(--color-pine-deep);"
         onclick={submit}
@@ -536,6 +623,11 @@
       <p class="text-xs text-content-muted">
         Marker ziehen oder tippen, um die Position manuell zu setzen.
       </p>
+      {#if data.plotParcels.length > 0}
+        <p class="text-xs text-content-muted m-0">
+          Orange Umrandung: Flurstücke des gewählten Waldstücks.
+        </p>
+      {/if}
     </section>
 
     <!-- Photos -->
