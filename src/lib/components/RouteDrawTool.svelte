@@ -355,13 +355,13 @@
   <!-- Backdrop — clicking it doesn't dismiss; users must use Abbrechen so
        they can't lose the freshly drawn path by accident. -->
   <div
-    class="absolute inset-0 z-30 pointer-events-auto"
+    class="fixed inset-0 z-30 pointer-events-auto"
     style="background: color-mix(in srgb, var(--color-ink) 35%, transparent);"
     aria-hidden="true"
   ></div>
 
   <div
-    class="absolute inset-x-0 bottom-0 z-40 pointer-events-auto animate-rise"
+    class="fixed inset-x-0 bottom-0 z-40 pointer-events-auto animate-rise"
     style="padding-bottom: env(safe-area-inset-bottom);"
   >
     <div

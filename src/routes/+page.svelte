@@ -1239,13 +1239,6 @@
                 {areasForActive.length === 1 ? "Bereich" : "Bereiche"}
               </p>
             </div>
-            <button
-              class="inline-flex items-center gap-1.5 px-3 py-2 min-h-[38px] rounded-pill text-ink border bg-surface font-semibold text-xs shadow-understory hover:-translate-y-px hover:shadow-canopy flex-shrink-0"
-              onclick={renameActivePlot}
-            >
-              <PencilSimple size="1em" />
-              Umbenennen
-            </button>
           </header>
 
           <!-- Wege -->
@@ -1663,6 +1656,12 @@
             <p class="text-xs text-content-muted m-0">
               Das Löschen entfernt alle zugehörigen Daten unwiderruflich.
             </p>
+            <button
+              class="inline-flex items-center justify-center gap-2 px-4 py-2.5 min-h-[44px] rounded-btn bg-surface border text-ink text-sm font-semibold hover:border-pine transition"
+              onclick={renameActivePlot}
+            >
+              <PencilSimple size="1em" /> Umbenennen
+            </button>
             <button
               class="inline-flex items-center justify-center gap-2 px-4 py-3 min-h-[48px] rounded-btn font-semibold text-sm text-earth border transition hover:-translate-y-px hover:shadow-understory"
               style="background: var(--color-crimson); border-color: color-mix(in srgb, var(--color-crimson) 75%, black);"
