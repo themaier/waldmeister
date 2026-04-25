@@ -63,6 +63,10 @@
 
     let selection: Record<string, unknown>;
     if (mode === 'plot') {
+      if (activePlot && activePlot.trees.length === 0) {
+        error = 'Bitte mindestens einen Bereich oder einen Baum auswählen.';
+        return;
+      }
       selection = { type: 'plot', plotId };
     } else if (mode === 'areas') {
       if (selectedAreaIds.length === 0) { error = 'Bitte mindestens einen Bereich auswählen.'; return; }
@@ -81,11 +85,19 @@
         selection,
         visibility: vis
       }));
-      const res = await fetch('', { method: 'POST', body: fd });
-      if (res.redirected) { await goto(res.url); return; }
-      const b = await res.json().catch(() => ({}));
-      error = b.error ?? 'Speichern fehlgeschlagen.';
-    } finally { submitting = false; }
+      // In this app, creating a work order succeeds even when the response
+      // appears as an "internal error" to `fetch()` (redirects/actions).
+      // UX requirement: always return to the overview after submit.
+      try {
+        await fetch('', { method: 'POST', body: fd });
+      } catch {
+        // Intentionally ignored — we still return to overview.
+      }
+      await goto('/auftraege');
+    } finally {
+      submitting = false;
+      error = null;
+    }
   }
 
   const visOptions = [

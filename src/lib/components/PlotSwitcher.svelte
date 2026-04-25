@@ -229,6 +229,14 @@
           >
         </li>
         <li>
+          <a
+            href="/auftraege"
+            class="flex items-center gap-2 text-sm text-content hover:bg-surface-muted hover:text-ink w-full"
+          >
+            <ClipboardText size="1.1em" /> Aufträge
+          </a>
+        </li>
+        <li>
           <button
             onclick={logout}
             class="flex items-center gap-2 text-sm text-content hover:bg-surface-muted hover:text-crimson w-full"
