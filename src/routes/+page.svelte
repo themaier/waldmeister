@@ -50,7 +50,6 @@
   let tapToast = $state<{ targetPlotId: string } | null>(null);
   // Route-drawing state. `routeDrawType` non-null = the tool is mounted; the
   // segmented picker (§5.4 step 2) sets which type the form starts with.
-  let routeTypePickerOpen = $state(false);
   let routeDrawType = $state<RouteType | null>(null);
   let treesForActive = $state<any[]>([]);
   let routesForActive = $state<any[]>([]);
@@ -268,12 +267,13 @@
       data: { type: "FeatureCollection", features: [] },
     });
     map.addLayer({
-      id: "routes-anfahrt",
+      id: "routes-anfahrt-a",
       type: "line",
       source: "routes",
       filter: ["!=", ["get", "routeType"], "rueckegasse"],
       paint: {
         "line-color": "#60a5fa",
+        "line-offset": -2,
         "line-width": [
           "case",
           [
@@ -281,21 +281,56 @@
             ["==", ["get", "routeType"], "anfahrt"],
             ["==", ["get", "vehicleType"], "großgerät"],
           ],
-          5,
+          2.5,
           ["==", ["get", "routeType"], "anfahrt"],
-          3,
-          2,
+          1.5,
+          1,
         ],
       },
     });
     map.addLayer({
-      id: "routes-rueckegasse",
+      id: "routes-anfahrt-b",
+      type: "line",
+      source: "routes",
+      filter: ["!=", ["get", "routeType"], "rueckegasse"],
+      paint: {
+        "line-color": "#60a5fa",
+        "line-offset": 2,
+        "line-width": [
+          "case",
+          [
+            "all",
+            ["==", ["get", "routeType"], "anfahrt"],
+            ["==", ["get", "vehicleType"], "großgerät"],
+          ],
+          2.5,
+          ["==", ["get", "routeType"], "anfahrt"],
+          1.5,
+          1,
+        ],
+      },
+    });
+    map.addLayer({
+      id: "routes-rueckegasse-a",
       type: "line",
       source: "routes",
       filter: ["==", ["get", "routeType"], "rueckegasse"],
       paint: {
         "line-color": "#60a5fa",
-        "line-width": 4,
+        "line-offset": -2,
+        "line-width": 1.75,
+        "line-dasharray": [2, 2],
+      },
+    });
+    map.addLayer({
+      id: "routes-rueckegasse-b",
+      type: "line",
+      source: "routes",
+      filter: ["==", ["get", "routeType"], "rueckegasse"],
+      paint: {
+        "line-color": "#60a5fa",
+        "line-offset": 2,
+        "line-width": 1.75,
         "line-dasharray": [2, 2],
       },
     });
@@ -510,7 +545,6 @@
   function startAreaDraw() {
     placementMode = false;
     routeDrawType = null;
-    routeTypePickerOpen = false;
     areaActionError = null;
     areaDrawActive = true;
   }
@@ -696,11 +730,11 @@
     placementMode = false;
   }
 
-  function startRouteDraw(type: RouteType) {
-    routeTypePickerOpen = false;
+  function startRouteDraw() {
     placementMode = false;
     areaDrawActive = false;
-    routeDrawType = type;
+    // Start drawing immediately; user picks Typ after drawing in the sheet.
+    routeDrawType = "anfahrt";
   }
   function cancelRouteDraw() {
     routeDrawType = null;
@@ -987,41 +1021,12 @@
               </h3>
               <button
                 class="inline-flex items-center gap-1.5 px-3 py-1.5 min-h-[34px] rounded-pill text-ink border bg-surface-muted font-semibold text-xs hover:border-pine"
-                aria-expanded={routeTypePickerOpen}
-                onclick={() => (routeTypePickerOpen = !routeTypePickerOpen)}
+                onclick={startRouteDraw}
               >
                 <Path size="1em" />
                 Weg zeichnen
               </button>
             </div>
-            {#if routeTypePickerOpen}
-              <div
-                class="grid grid-cols-2 gap-2 animate-rise"
-                role="group"
-                aria-label="Wegtyp wählen"
-              >
-                <button
-                  class="inline-flex items-center justify-center gap-2 px-3 py-2 min-h-[38px] rounded-pill text-ink border bg-surface font-semibold text-xs shadow-understory hover:-translate-y-px hover:shadow-canopy"
-                  onclick={() => startRouteDraw("anfahrt")}
-                >
-                  <span
-                    class="inline-block w-6 h-[3px] rounded-full"
-                    style="background: #2563eb;"
-                  ></span>
-                  Anfahrt
-                </button>
-                <button
-                  class="inline-flex items-center justify-center gap-2 px-3 py-2 min-h-[38px] rounded-pill text-ink border bg-surface font-semibold text-xs shadow-understory hover:-translate-y-px hover:shadow-canopy"
-                  onclick={() => startRouteDraw("rueckegasse")}
-                >
-                  <span
-                    class="inline-block w-6 h-[3px] rounded-full"
-                    style="background: repeating-linear-gradient(90deg, #60a5fa 0 4px, transparent 4px 8px);"
-                  ></span>
-                  Rückegasse
-                </button>
-              </div>
-            {/if}
             {#if routesForActive.length === 0}
               <p class="text-sm text-content-muted m-0">Noch keine Wege gezeichnet.</p>
             {:else}
@@ -1032,8 +1037,8 @@
                       <span
                         class="inline-block w-6 h-[3px] rounded-full flex-shrink-0"
                         style={r.routeType === "rueckegasse"
-                          ? "background: repeating-linear-gradient(90deg, #60a5fa 0 4px, transparent 4px 8px);"
-                          : "background: #2563eb;"}
+                          ? "background: repeating-linear-gradient(90deg, #60a5fa 0 4px, transparent 4px 8px) 0 35%/100% 2px no-repeat, repeating-linear-gradient(90deg, #60a5fa 0 4px, transparent 4px 8px) 0 70%/100% 2px no-repeat;"
+                          : "background: linear-gradient(#2563eb,#2563eb) 0 35%/100% 2px no-repeat, linear-gradient(#2563eb,#2563eb) 0 70%/100% 2px no-repeat;"}
                         aria-hidden="true"
                       ></span>
                       <span class="text-sm text-ink font-medium truncate">

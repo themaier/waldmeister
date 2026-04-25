@@ -15,10 +15,7 @@
   import { untrack } from 'svelte';
   import { X, Check, ArrowCounterClockwise } from 'phosphor-svelte';
   import {
-    ROUTE_TYPES,
     ROUTE_TYPE_LABELS,
-    VEHICLE_TYPES,
-    VEHICLE_TYPE_LABELS,
     type RouteType,
     type VehicleType
   } from '$lib/enums';
@@ -46,7 +43,6 @@
   // CLAUDE.md ("Default to `$derived` … unless …form fields with `bind:value`").
   // The user can switch Typ inside the sheet without us snapping it back.
   let routeType = $state<RouteType>(untrack(() => initialType));
-  let vehicleType = $state<VehicleType>('kleingerät');
   let name = $state('');
   let comment = $state('');
   // Current stroke; committed strokes live in `lines` (see pointerUp).
@@ -54,15 +50,19 @@
   let lines = $state<[number, number][][]>([]);
   let saveError = $state<string | null>(null);
 
-  // README §4.3 — Rückegasse → vehicleType locked to kleingerät.
-  $effect(() => {
-    if (routeType === 'rueckegasse' && vehicleType !== 'kleingerät') {
-      vehicleType = 'kleingerät';
-    }
-  });
+  // Only two combined options → vehicle type is implied.
+  const vehicleType = $derived<VehicleType>(
+    routeType === 'rueckegasse' ? 'kleingerät' : 'großgerät'
+  );
+  const routeTypeLabel = $derived(
+    routeType === 'rueckegasse' ? 'Rückegasse (Traktor)' : 'Straße (LKW)'
+  );
 
   const SOURCE_ID = 'route-draft';
-  const LAYER_ID = 'route-draft';
+  const LAYER_SOLID_A = 'route-draft-solid-a';
+  const LAYER_SOLID_B = 'route-draft-solid-b';
+  const LAYER_DASHED_A = 'route-draft-dashed-a';
+  const LAYER_DASHED_B = 'route-draft-dashed-b';
 
   function ensureLayer() {
     if (mlMap.getSource(SOURCE_ID)) return;
@@ -70,15 +70,49 @@
       type: 'geojson',
       data: { type: 'FeatureCollection', features: [] }
     });
+    const basePaint = {
+      'line-color': '#2563eb',
+      'line-opacity': 0.95,
+      'line-width': 2
+    };
+    const offsetA = { ...basePaint, 'line-offset': -2 };
+    const offsetB = { ...basePaint, 'line-offset': 2 };
+    const dashedA = {
+      ...offsetA,
+      'line-dasharray': [2, 2]
+    };
+    const dashedB = {
+      ...offsetB,
+      'line-dasharray': [2, 2]
+    };
+
     mlMap.addLayer({
-      id: LAYER_ID,
+      id: LAYER_SOLID_A,
       type: 'line',
       source: SOURCE_ID,
-      paint: {
-        'line-color': '#2563eb',
-        'line-width': 5,
-        'line-opacity': 0.95
-      }
+      layout: { visibility: 'visible' },
+      paint: offsetA
+    });
+    mlMap.addLayer({
+      id: LAYER_SOLID_B,
+      type: 'line',
+      source: SOURCE_ID,
+      layout: { visibility: 'visible' },
+      paint: offsetB
+    });
+    mlMap.addLayer({
+      id: LAYER_DASHED_A,
+      type: 'line',
+      source: SOURCE_ID,
+      layout: { visibility: 'none' },
+      paint: dashedA
+    });
+    mlMap.addLayer({
+      id: LAYER_DASHED_B,
+      type: 'line',
+      source: SOURCE_ID,
+      layout: { visibility: 'none' },
+      paint: dashedB
     });
   }
 
@@ -107,7 +141,9 @@
   }
 
   function clearPreview() {
-    if (mlMap.getLayer(LAYER_ID)) mlMap.removeLayer(LAYER_ID);
+    for (const id of [LAYER_SOLID_A, LAYER_SOLID_B, LAYER_DASHED_A, LAYER_DASHED_B]) {
+      if (mlMap.getLayer(id)) mlMap.removeLayer(id);
+    }
     if (mlMap.getSource(SOURCE_ID)) mlMap.removeSource(SOURCE_ID);
   }
 
@@ -212,6 +248,17 @@
     };
   });
 
+  $effect(() => {
+    // Toggle solid vs dashed preview depending on the chosen route type.
+    const dashed = routeType === 'rueckegasse';
+    for (const id of [LAYER_DASHED_A, LAYER_DASHED_B]) {
+      if (mlMap.getLayer(id)) mlMap.setLayoutProperty(id, 'visibility', dashed ? 'visible' : 'none');
+    }
+    for (const id of [LAYER_SOLID_A, LAYER_SOLID_B]) {
+      if (mlMap.getLayer(id)) mlMap.setLayoutProperty(id, 'visibility', dashed ? 'none' : 'visible');
+    }
+  });
+
   function redo() {
     path = [];
     lines = [];
@@ -260,9 +307,7 @@
     style="top: calc(0.75rem + env(safe-area-inset-top)); background: var(--color-pine-deep);"
   >
     <span class="w-2 h-2 rounded-full bg-ember animate-breathe"></span>
-    <span
-      >{ROUTE_TYPE_LABELS[routeType]} — Strich {lines.length + 1} mit dem Finger zeichnen</span
-    >
+    <span>Weg zeichnen — Strich {lines.length + 1} mit dem Finger zeichnen</span>
     <button
       class="w-7 h-7 min-h-0 min-w-0 grid place-items-center rounded-full text-earth border-0"
       style="background: color-mix(in srgb, var(--color-earth) 14%, transparent);"
@@ -320,7 +365,7 @@
             class="font-serif font-medium text-[1.25rem] leading-tight tracking-tight text-ink m-0"
             style="font-variation-settings: 'opsz' 96, 'SOFT' 40, 'WONK' 1;"
           >
-            {ROUTE_TYPE_LABELS[routeType]}
+            {routeTypeLabel}
           </h2>
         </div>
         <button
@@ -340,9 +385,8 @@
           bind:value={routeType}
           disabled={phase === 'saving'}
         >
-          {#each ROUTE_TYPES as type}
-            <option value={type}>{ROUTE_TYPE_LABELS[type]}</option>
-          {/each}
+          <option value="rueckegasse">Rückegasse (Traktor)</option>
+          <option value="anfahrt">Straße (LKW)</option>
         </select>
       </label>
 
@@ -356,28 +400,6 @@
           bind:value={name}
           disabled={phase === 'saving'}
         />
-      </label>
-
-      <label class="flex flex-col gap-1.5 text-sm">
-        <span class="font-semibold text-ink">Passendes Gerät</span>
-        <select
-          class="px-3 py-2.5 min-h-[42px] rounded-btn bg-earth border text-ink text-sm focus:outline-none focus:border-pine disabled:opacity-60"
-          bind:value={vehicleType}
-          disabled={routeType === 'rueckegasse' || phase === 'saving'}
-        >
-          {#each VEHICLE_TYPES as v}
-            <option value={v}>{VEHICLE_TYPE_LABELS[v]}</option>
-          {/each}
-        </select>
-        {#if routeType === 'rueckegasse'}
-          <p class="text-xs text-content-muted leading-relaxed">
-            Rückegassen sind immer nur für Kleingerät befahrbar.
-          </p>
-        {:else}
-          <p class="text-xs text-content-muted leading-relaxed">
-            Welche Fahrzeuge passen durch diese Anfahrt?
-          </p>
-        {/if}
       </label>
 
       <label class="flex flex-col gap-1.5 text-sm">
