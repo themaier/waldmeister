@@ -12,6 +12,11 @@
 	# auto_https disable_redirects
 }
 
+# Redirect www → apex (single canonical host, single cert chain to reason about).
+www.{$DOMAIN} {
+	redir https://{$DOMAIN}{uri} permanent
+}
+
 {$DOMAIN} {
 	encode gzip zstd
 
