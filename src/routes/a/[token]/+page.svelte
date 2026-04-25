@@ -121,6 +121,7 @@
           trees={data.trees}
           areas={data.areas}
           forestParcels={data.plotParcels}
+          forestCenter={data.plotCenter}
           highlightedAreaIds={data.order.selection?.type === 'areas' ? data.order.selection.areaIds : null}
         />
         <button
