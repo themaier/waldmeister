@@ -275,8 +275,8 @@
   <div class="home-map relative">
     <Map
       bind:this={mapRef}
-      initialCenter={[12.9164, 48.26]}
-      initialZoom={17}
+      initialCenter={[11.5, 48.5]}
+      initialZoom={8}
       onClick={handleMapClick}
     />
 

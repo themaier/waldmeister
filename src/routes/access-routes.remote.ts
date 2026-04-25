@@ -100,3 +100,46 @@ export const deleteRoute = command(z.string().uuid(), async (id) => {
   void getPlotOverview(route.plotId).refresh();
   return { ok: true };
 });
+
+const updateRouteSchema = z.object({
+  id: z.string().uuid(),
+  routeType: z.enum(ROUTE_TYPES),
+  vehicleType: z.enum(VEHICLE_TYPES),
+  name: z.string().trim().max(120).nullable().optional(),
+  comment: z.string().trim().max(2000).nullable().optional()
+});
+
+export const updateRoute = command('unchecked', async (raw: unknown) => {
+  const { locals } = getRequestEvent();
+  if (!locals.user) throw error(401, 'Nicht angemeldet.');
+  const parsed = updateRouteSchema.safeParse(raw);
+  if (!parsed.success) throw error(400, parsed.error.issues[0].message);
+  const input = parsed.data;
+
+  // README §4.3 constraint — Rückegassen are always Kleingerät only.
+  if (input.routeType === 'rueckegasse' && input.vehicleType !== 'kleingerät') {
+    throw error(400, 'Rückegassen sind immer nur für Kleingerät befahrbar.');
+  }
+
+  const [route] = await db
+    .select({ id: accessRoutes.id, plotId: accessRoutes.plotId })
+    .from(accessRoutes)
+    .innerJoin(forestPlots, eq(forestPlots.id, accessRoutes.plotId))
+    .where(and(eq(accessRoutes.id, input.id), eq(forestPlots.ownerId, locals.user.id)))
+    .limit(1);
+  if (!route) throw error(404, 'Weg nicht gefunden.');
+
+  await db
+    .update(accessRoutes)
+    .set({
+      routeType: input.routeType,
+      vehicleType: input.vehicleType,
+      name: input.name?.trim() || null,
+      comment: input.comment?.trim() || null,
+      updatedAt: new Date()
+    })
+    .where(eq(accessRoutes.id, input.id));
+
+  void getPlotOverview(route.plotId).refresh();
+  return { ok: true };
+});

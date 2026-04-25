@@ -4,27 +4,39 @@
   // camera rather than navigating routes.
 
   import { goto } from "$app/navigation";
+  import { invalidateAll } from "$app/navigation";
   import Map from "$lib/components/Map.svelte";
   import PlotSwitcher from "$lib/components/PlotSwitcher.svelte";
   import OnboardingCard from "$lib/components/OnboardingCard.svelte";
   import RouteDrawTool from "$lib/components/RouteDrawTool.svelte";
   import AreaDrawTool from "$lib/components/AreaDrawTool.svelte";
   import { boundsOfPolygons, shouldFlyTo } from "$lib/geo";
+  import { getBetterGpsFix, type GpsFix } from "$lib/gps";
   import {
     Camera,
     Crosshair,
     X,
-    Gear,
     Tree,
     Calculator,
     Path,
     Polygon as PolygonIcon,
+    PencilSimple,
+    Trash,
+    Plus,
+    MapTrifold,
   } from "phosphor-svelte";
   import type { PageData } from "./$types";
   import maplibregl from "maplibre-gl";
   import { getPlotOverview, officialTreeDotsForPlot } from "./trees.remote";
-  import { createRoute } from "./access-routes.remote";
+  import { createRoute, deleteRoute, updateRoute } from "./access-routes.remote";
   import { createArea, deleteArea } from "./areas.remote";
+  import {
+    createBoundaryStone,
+    deleteBoundaryStone,
+    getBoundaryStones,
+    updateBoundaryStone,
+  } from "./boundary-stones.remote";
+  import { renamePlot, deletePlot } from "./plots.remote";
   import {
     HEALTH_LABELS,
     ROUTE_TYPE_LABELS,
@@ -83,6 +95,41 @@
   let treeCountResult = $state<number | null>(null);
   let treeActionError = $state<string | null>(null);
   let lastBounds = $state<[[number, number], [number, number]] | null>(null);
+  let boundaryStonesForActive = $state<
+    {
+      id: string;
+      description: string | null;
+      latitude: number | null;
+      longitude: number | null;
+      gpsAccuracyM: number | null;
+      widthPx: number;
+      heightPx: number;
+      takenAt: string;
+      url: string;
+    }[]
+  >([]);
+
+  let stoneFile = $state<File | null>(null);
+  let stonePreview = $state<string | null>(null);
+  let stoneDescription = $state("");
+  let stoneCaptureGps = $state(true);
+  let stoneGps = $state<GpsFix | null>(null);
+  let stoneGpsCapturing = $state(false);
+  let stoneSubmitting = $state(false);
+  let stoneError = $state<string | null>(null);
+  let stoneEditing = $state<Record<string, string>>({});
+  let routesOpen = $state(false);
+  let routeEdits = $state<
+    Record<
+      string,
+      {
+        routeType: RouteType;
+        vehicleType: "kleingerät" | "großgerät";
+        name: string;
+        comment: string;
+      }
+    >
+  >({});
 
   const activePlot = $derived(data.plots.find((p) => p.id === activePlotId));
   const activeParcels = $derived(
@@ -188,12 +235,7 @@
           "#b65a1f",
           "#c98f2a",
         ],
-        "line-width": [
-          "case",
-          ["==", ["get", "isSelected"], true],
-          2.5,
-          1.5,
-        ],
+        "line-width": ["case", ["==", ["get", "isSelected"], true], 2.5, 1.5],
         "line-opacity": 0.95,
       },
     });
@@ -405,8 +447,7 @@
       const [xi, yi] = ring[i];
       const [xj, yj] = ring[j];
       const intersects =
-        yi > y !== yj > y &&
-        x < ((xj - xi) * (y - yi)) / (yj - yi + 0.0) + xi;
+        yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi + 0.0) + xi;
       if (intersects) inside = !inside;
     }
     return inside;
@@ -479,14 +520,20 @@
       treesForActive = [];
       routesForActive = [];
       areasForActive = [];
+      boundaryStonesForActive = [];
     } else {
       try {
-        const body = await getPlotOverview(plotId).run();
+        const [body, stones] = await Promise.all([
+          getPlotOverview(plotId).run(),
+          getBoundaryStones(plotId).run(),
+        ]);
         treesForActive = body.trees;
         routesForActive = body.routes;
         areasForActive = (body.areas ?? []) as typeof areasForActive;
+        boundaryStonesForActive = stones;
       } catch {
         /* non-fatal: leave layers empty on error */
+        boundaryStonesForActive = [];
       }
     }
     // Reset official-tree state on every plot switch — the cached dots
@@ -517,6 +564,159 @@
       })),
     });
     updateOfficialTreeFeatures();
+  }
+
+  async function renameActivePlot() {
+    if (!activePlotId) return;
+    const current = activePlot?.name ?? "";
+    const name = prompt("Name", current);
+    if (name === null) return;
+    await renamePlot({ id: activePlotId, name });
+    location.reload();
+  }
+
+  async function deleteActivePlot() {
+    if (!activePlotId) return;
+    if (
+      !confirm(
+        "Waldstück und alle enthaltenen Daten (Bäume, Bereiche, Fotos, Anfahrten) löschen?"
+      )
+    )
+      return;
+    await deletePlot(activePlotId);
+    location.href = "/";
+  }
+
+  async function imageSize(
+    url: string
+  ): Promise<{ width: number; height: number }> {
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.onload = () =>
+        resolve({ width: img.naturalWidth, height: img.naturalHeight });
+      img.src = url;
+    });
+  }
+
+  function pickStoneFile(e: Event) {
+    const input = e.target as HTMLInputElement;
+    const f = input.files?.[0];
+    if (!f) return;
+    if (stonePreview) URL.revokeObjectURL(stonePreview);
+    stoneFile = f;
+    stonePreview = URL.createObjectURL(f);
+    stoneError = null;
+    stoneGps = null;
+    if (stoneCaptureGps && !stoneGpsCapturing) {
+      stoneGpsCapturing = true;
+      getBetterGpsFix({
+        minWaitMs: 3000,
+        maxWaitMs: 6500,
+        desiredAccuracyM: 10,
+      })
+        .then((fix) => {
+          stoneGps = fix;
+        })
+        .finally(() => {
+          stoneGpsCapturing = false;
+        });
+    }
+    input.value = "";
+  }
+
+  function clearStoneDraft() {
+    if (stonePreview) URL.revokeObjectURL(stonePreview);
+    stoneFile = null;
+    stonePreview = null;
+    stoneDescription = "";
+    stoneError = null;
+    stoneGps = null;
+    stoneGpsCapturing = false;
+  }
+
+  async function refreshBoundaryStones() {
+    if (!activePlotId) {
+      boundaryStonesForActive = [];
+      return;
+    }
+    boundaryStonesForActive = await getBoundaryStones(activePlotId).run();
+  }
+
+  async function submitStone() {
+    if (!activePlotId) return;
+    if (!stoneFile || !stonePreview) {
+      stoneError = "Bitte ein Foto auswählen.";
+      return;
+    }
+    stoneSubmitting = true;
+    stoneError = null;
+    try {
+      const { width, height } = await imageSize(stonePreview);
+      const gps =
+        stoneCaptureGps ?
+          (stoneGps ??
+          (await getBetterGpsFix({
+            minWaitMs: 3000,
+            maxWaitMs: 7000,
+            desiredAccuracyM: 10,
+          })))
+        : null;
+
+      const result = await createBoundaryStone({
+        plotId: activePlotId,
+        description: stoneDescription,
+        latitude: gps?.lat ?? null,
+        longitude: gps?.lng ?? null,
+        gpsAccuracyM: gps?.acc ?? null,
+        contentType: stoneFile.type || "image/jpeg",
+        widthPx: width,
+        heightPx: height,
+      });
+
+      if (!result.uploadUrl) {
+        stoneError =
+          "Keine Upload-URL vom Server (S3 presign fehlgeschlagen). Prüfe S3_* in .env und die Server-Logs.";
+        return;
+      }
+      const put = await fetch(result.uploadUrl, {
+        method: "PUT",
+        headers: { "content-type": result.contentType },
+        body: stoneFile,
+      });
+      if (!put.ok) {
+        stoneError = `Foto-Upload fehlgeschlagen (HTTP ${put.status}).`;
+        return;
+      }
+
+      clearStoneDraft();
+      await invalidateAll();
+      await refreshBoundaryStones();
+    } catch (e) {
+      stoneError = e instanceof Error ? e.message : "Speichern fehlgeschlagen.";
+    } finally {
+      stoneSubmitting = false;
+    }
+  }
+
+  async function removeStone(id: string) {
+    if (!confirm("Diesen Grenzstein löschen?")) return;
+    await deleteBoundaryStone(id);
+    await invalidateAll();
+    await refreshBoundaryStones();
+  }
+
+  function startStoneEdit(id: string, current: string | null) {
+    stoneEditing[id] = current ?? "";
+  }
+  function cancelStoneEdit(id: string) {
+    delete stoneEditing[id];
+  }
+  async function saveStoneEdit(id: string) {
+    const text = stoneEditing[id] ?? "";
+    await updateBoundaryStone({ id, description: text });
+    delete stoneEditing[id];
+    await invalidateAll();
+    await refreshBoundaryStones();
   }
 
   function selectArea(areaId: string | null) {
@@ -554,12 +754,7 @@
   async function completeAreaDraw(input: {
     geometry: { type: "Polygon"; coordinates: [number, number][][] };
     comment: string | null;
-    appliedTreeStatus:
-      | "healthy"
-      | "must-watch"
-      | "infected"
-      | "dead"
-      | null;
+    appliedTreeStatus: "healthy" | "must-watch" | "infected" | "dead" | null;
   }) {
     if (!activePlotId) {
       areaDrawActive = false;
@@ -589,7 +784,9 @@
       await loadActivePlotLayers(activePlotId);
     } catch (e) {
       areaActionError =
-        e instanceof Error ? e.message : "Bereich konnte nicht gelöscht werden.";
+        e instanceof Error ?
+          e.message
+        : "Bereich konnte nicht gelöscht werden.";
     }
   }
 
@@ -753,6 +950,36 @@
     routeDrawType = null;
     // Pull the fresh overview into the map layers without a full reload.
     await loadActivePlotLayers(activePlotId);
+  }
+
+  function startRouteEdit(r: any) {
+    routeEdits[r.id] = {
+      routeType: r.routeType,
+      vehicleType: r.vehicleType,
+      name: r.name ?? "",
+      comment: r.comment ?? "",
+    };
+  }
+  function cancelRouteEdit(id: string) {
+    delete routeEdits[id];
+  }
+  async function saveRouteEdit(id: string) {
+    const draft = routeEdits[id];
+    if (!draft) return;
+    await updateRoute({
+      id,
+      routeType: draft.routeType,
+      vehicleType: draft.routeType === "rueckegasse" ? "kleingerät" : draft.vehicleType,
+      name: draft.name.trim() || null,
+      comment: draft.comment.trim() || null,
+    });
+    delete routeEdits[id];
+    if (activePlotId) await loadActivePlotLayers(activePlotId);
+  }
+  async function removeRoute(id: string) {
+    if (!confirm("Diesen Weg löschen?")) return;
+    await deleteRoute(id);
+    if (activePlotId) await loadActivePlotLayers(activePlotId);
   }
 
   async function addTreeAtCurrentGps() {
@@ -941,45 +1168,53 @@
         aria-label="Bereich-Auswahl"
         class="grid grid-cols-3 gap-1 p-1 rounded-pill bg-surface-muted border"
       >
-          <button
-            role="tab"
-            aria-selected={activeTab === "waldstueck"}
-            class="inline-flex items-center justify-center gap-1.5 px-2 py-2 min-h-[40px] rounded-pill text-[0.8125rem] font-semibold transition truncate"
-            class:text-content-muted={activeTab !== "waldstueck"}
-            style={activeTab === "waldstueck"
-              ? "background: var(--color-surface); color: var(--color-ink); box-shadow: var(--shadow-duff);"
-              : ""}
-            onclick={() => (activeTab = "waldstueck")}
+        <button
+          role="tab"
+          aria-selected={activeTab === "waldstueck"}
+          class="inline-flex items-center justify-center gap-1.5 px-2 py-2 min-h-[40px] rounded-pill text-[0.8125rem] font-semibold transition truncate"
+          class:text-content-muted={activeTab !== "waldstueck"}
+          style={activeTab === "waldstueck" ?
+            "background: var(--color-surface); color: var(--color-ink); box-shadow: var(--shadow-duff);"
+          : ""}
+          onclick={() => (activeTab = "waldstueck")}
+        >
+          <Tree size="1em" weight="regular" />
+          <span>Waldstück</span>
+        </button>
+        <button
+          role="tab"
+          aria-selected={activeTab === "baeume"}
+          class="inline-flex items-center justify-center gap-1.5 px-2 py-2 min-h-[40px] rounded-pill text-[0.8125rem] font-semibold transition truncate"
+          class:text-content-muted={activeTab !== "baeume"}
+          style={activeTab === "baeume" ?
+            "background: var(--color-surface); color: var(--color-ink); box-shadow: var(--shadow-duff);"
+          : ""}
+          onclick={() => (activeTab = "baeume")}
+        >
+          <Crosshair size="1em" weight="regular" />
+          <span
+            >Bäume <span class="text-content-muted font-normal"
+              >{treesForActive.length}</span
+            ></span
           >
-            <Tree size="1em" weight="regular" />
-            <span>Waldstück</span>
-          </button>
-          <button
-            role="tab"
-            aria-selected={activeTab === "baeume"}
-            class="inline-flex items-center justify-center gap-1.5 px-2 py-2 min-h-[40px] rounded-pill text-[0.8125rem] font-semibold transition truncate"
-            class:text-content-muted={activeTab !== "baeume"}
-            style={activeTab === "baeume"
-              ? "background: var(--color-surface); color: var(--color-ink); box-shadow: var(--shadow-duff);"
-              : ""}
-            onclick={() => (activeTab = "baeume")}
+        </button>
+        <button
+          role="tab"
+          aria-selected={activeTab === "bereich"}
+          class="inline-flex items-center justify-center gap-1.5 px-2 py-2 min-h-[40px] rounded-pill text-[0.8125rem] font-semibold transition truncate"
+          class:text-content-muted={activeTab !== "bereich"}
+          style={activeTab === "bereich" ?
+            "background: var(--color-surface); color: var(--color-ink); box-shadow: var(--shadow-duff);"
+          : ""}
+          onclick={() => (activeTab = "bereich")}
+        >
+          <PolygonIcon size="1em" weight="regular" />
+          <span
+            >Bereich <span class="text-content-muted font-normal"
+              >{areasForActive.length}</span
+            ></span
           >
-            <Crosshair size="1em" weight="regular" />
-            <span>Bäume <span class="text-content-muted font-normal">{treesForActive.length}</span></span>
-          </button>
-          <button
-            role="tab"
-            aria-selected={activeTab === "bereich"}
-            class="inline-flex items-center justify-center gap-1.5 px-2 py-2 min-h-[40px] rounded-pill text-[0.8125rem] font-semibold transition truncate"
-            class:text-content-muted={activeTab !== "bereich"}
-            style={activeTab === "bereich"
-              ? "background: var(--color-surface); color: var(--color-ink); box-shadow: var(--shadow-duff);"
-              : ""}
-            onclick={() => (activeTab = "bereich")}
-          >
-            <PolygonIcon size="1em" weight="regular" />
-            <span>Bereich <span class="text-content-muted font-normal">{areasForActive.length}</span></span>
-          </button>
+        </button>
       </div>
 
       {#if activeTab === "waldstueck"}
@@ -1004,50 +1239,158 @@
                 {areasForActive.length === 1 ? "Bereich" : "Bereiche"}
               </p>
             </div>
-            <a
-              class="inline-flex items-center gap-1.5 px-3 py-2 min-h-[38px] rounded-pill text-ink border bg-surface font-semibold text-xs shadow-understory hover:-translate-y-px hover:shadow-canopy no-underline flex-shrink-0"
-              href="/waldstuecke/{activePlot.id}"
+            <button
+              class="inline-flex items-center gap-1.5 px-3 py-2 min-h-[38px] rounded-pill text-ink border bg-surface font-semibold text-xs shadow-understory hover:-translate-y-px hover:shadow-canopy flex-shrink-0"
+              onclick={renameActivePlot}
             >
-              <Gear size="1em" />
-              Verwalten
-            </a>
+              <PencilSimple size="1em" />
+              Umbenennen
+            </button>
           </header>
 
           <!-- Wege -->
-          <div class="flex flex-col gap-2 p-4 rounded-2xl bg-surface border shadow-understory">
+          <div
+            class="flex flex-col gap-2 p-4 rounded-2xl bg-surface border shadow-understory"
+          >
             <div class="flex items-center justify-between gap-2">
-              <h3 class="text-xs font-semibold uppercase tracking-wider text-content-muted m-0">
-                Wege ({routesForActive.length})
-              </h3>
+              <button
+                class="inline-flex items-center gap-2 px-3 py-1.5 min-h-[34px] rounded-pill text-ink border bg-surface-muted font-semibold text-xs hover:border-pine"
+                onclick={() => (routesOpen = !routesOpen)}
+                aria-expanded={routesOpen}
+              >
+                Wege{" "}
+                <span class="text-content-muted font-normal">
+                  ({routesForActive.length})
+                </span>
+                <span class="text-content-muted" aria-hidden="true">
+                  {routesOpen ? "▲" : "▼"}
+                </span>
+              </button>
               <button
                 class="inline-flex items-center gap-1.5 px-3 py-1.5 min-h-[34px] rounded-pill text-ink border bg-surface-muted font-semibold text-xs hover:border-pine"
                 onclick={startRouteDraw}
               >
                 <Path size="1em" />
-                Weg zeichnen
+                Wege einzeichnen
               </button>
             </div>
-            {#if routesForActive.length === 0}
-              <p class="text-sm text-content-muted m-0">Noch keine Wege gezeichnet.</p>
-            {:else}
+
+            {#if routesOpen && routesForActive.length === 0}
+              <p class="text-sm text-content-muted m-0">
+                Noch keine Wege gezeichnet.
+              </p>
+            {:else if routesOpen}
               <ul class="flex flex-col gap-1.5 list-none p-0 m-0">
                 {#each routesForActive as r (r.id)}
-                  <li class="flex items-center justify-between gap-3 px-3 py-2 rounded-btn bg-surface-muted border">
-                    <div class="flex items-center gap-2 min-w-0">
-                      <span
-                        class="inline-block w-6 h-[3px] rounded-full flex-shrink-0"
-                        style={r.routeType === "rueckegasse"
-                          ? "background: repeating-linear-gradient(90deg, #60a5fa 0 4px, transparent 4px 8px) 0 35%/100% 2px no-repeat, repeating-linear-gradient(90deg, #60a5fa 0 4px, transparent 4px 8px) 0 70%/100% 2px no-repeat;"
+                  {@const editing = routeEdits[r.id]}
+                  <li class="flex flex-col gap-2 px-3 py-2 rounded-btn bg-surface-muted border">
+                    <div class="flex items-center justify-between gap-3">
+                      <div class="flex items-center gap-2 min-w-0">
+                        <span
+                          class="inline-block w-6 h-[3px] rounded-full flex-shrink-0"
+                          style={r.routeType === "rueckegasse" ?
+                            "background: repeating-linear-gradient(90deg, #60a5fa 0 4px, transparent 4px 8px) 0 35%/100% 2px no-repeat, repeating-linear-gradient(90deg, #60a5fa 0 4px, transparent 4px 8px) 0 70%/100% 2px no-repeat;"
                           : "background: linear-gradient(#2563eb,#2563eb) 0 35%/100% 2px no-repeat, linear-gradient(#2563eb,#2563eb) 0 70%/100% 2px no-repeat;"}
-                        aria-hidden="true"
-                      ></span>
-                      <span class="text-sm text-ink font-medium truncate">
-                        {r.name ?? ROUTE_TYPE_LABELS[r.routeType as keyof typeof ROUTE_TYPE_LABELS]}
-                      </span>
+                          aria-hidden="true"
+                        ></span>
+                        <span class="text-sm text-ink font-medium truncate">
+                          {r.name ??
+                            ROUTE_TYPE_LABELS[
+                              r.routeType as keyof typeof ROUTE_TYPE_LABELS
+                            ]}
+                        </span>
+                      </div>
+
+                      <div class="flex items-center gap-2 flex-shrink-0">
+                        <span class="text-xs text-content-muted whitespace-nowrap">
+                          {VEHICLE_TYPE_LABELS[
+                            r.vehicleType as keyof typeof VEHICLE_TYPE_LABELS
+                          ] ?? r.vehicleType}
+                        </span>
+                        <button
+                          class="inline-flex items-center justify-center w-8 h-8 rounded-btn border text-content hover:border-pine transition"
+                          onclick={() =>
+                            editing ? cancelRouteEdit(r.id) : startRouteEdit(r)}
+                          aria-label={editing ? "Bearbeiten schließen" : "Weg bearbeiten"}
+                          title={editing ? "Bearbeiten schließen" : "Weg bearbeiten"}
+                        >
+                          <PencilSimple size="0.875em" />
+                        </button>
+                        <button
+                          class="inline-flex items-center justify-center w-8 h-8 rounded-btn border text-crimson hover:border-crimson transition"
+                          onclick={() => removeRoute(r.id)}
+                          aria-label="Weg löschen"
+                          title="Weg löschen"
+                        >
+                          <Trash size="0.875em" />
+                        </button>
+                      </div>
                     </div>
-                    <span class="text-xs text-content-muted whitespace-nowrap">
-                      {VEHICLE_TYPE_LABELS[r.vehicleType as keyof typeof VEHICLE_TYPE_LABELS] ?? r.vehicleType}
-                    </span>
+
+                    {#if editing}
+                      <div class="grid gap-2">
+                        <div class="grid grid-cols-2 gap-2">
+                          <label class="flex flex-col gap-1 text-xs">
+                            <span class="text-content-muted font-semibold">Typ</span>
+                            <select
+                              class="px-2 py-2 min-h-[38px] rounded-btn bg-earth border text-ink text-xs focus:outline-none focus:border-pine"
+                              bind:value={routeEdits[r.id].routeType}
+                            >
+                              <option value="rueckegasse">Rückegasse</option>
+                              <option value="anfahrt">Straße</option>
+                            </select>
+                          </label>
+                          <label class="flex flex-col gap-1 text-xs">
+                            <span class="text-content-muted font-semibold">Gerät</span>
+                            <select
+                              class="px-2 py-2 min-h-[38px] rounded-btn bg-earth border text-ink text-xs focus:outline-none focus:border-pine"
+                              bind:value={routeEdits[r.id].vehicleType}
+                              disabled={routeEdits[r.id].routeType === "rueckegasse"}
+                            >
+                              <option value="kleingerät">Kleingerät</option>
+                              <option value="großgerät">Großgerät</option>
+                            </select>
+                          </label>
+                        </div>
+
+                        <label class="flex flex-col gap-1 text-xs">
+                          <span class="text-content-muted font-semibold">Name</span>
+                          <input
+                            class="px-2 py-2 min-h-[38px] rounded-btn bg-earth border text-ink text-xs focus:outline-none focus:border-pine"
+                            placeholder="(optional)"
+                            bind:value={routeEdits[r.id].name}
+                            maxlength="120"
+                          />
+                        </label>
+
+                        <label class="flex flex-col gap-1 text-xs">
+                          <span class="text-content-muted font-semibold">Kommentar</span>
+                          <textarea
+                            class="px-2 py-2 min-h-[64px] rounded-btn bg-earth border text-ink text-xs focus:outline-none focus:border-pine resize-y"
+                            rows="2"
+                            placeholder="(optional)"
+                            bind:value={routeEdits[r.id].comment}
+                            maxlength="2000"
+                          ></textarea>
+                        </label>
+
+                        <div class="flex justify-end gap-2">
+                          <button
+                            class="px-3 py-2 min-h-[38px] rounded-pill bg-transparent border text-ink font-semibold text-xs hover:border-pine"
+                            onclick={() => cancelRouteEdit(r.id)}
+                          >
+                            Abbrechen
+                          </button>
+                          <button
+                            class="px-4 py-2 min-h-[38px] rounded-pill text-earth border font-semibold text-xs shadow-understory"
+                            style="background: var(--color-pine);"
+                            onclick={() => saveRouteEdit(r.id)}
+                          >
+                            Speichern
+                          </button>
+                        </div>
+                      </div>
+                    {/if}
                   </li>
                 {/each}
               </ul>
@@ -1057,12 +1400,17 @@
           <!-- Plot-level analyses: official BayernAtlas tree dots + count.
                These belong to the Waldstück, not to the user's own
                inventory, so they live here rather than under "Bäume". -->
-          <div class="flex flex-col gap-2 p-4 rounded-2xl bg-surface border shadow-understory">
-            <h3 class="text-xs font-semibold uppercase tracking-wider text-content-muted m-0">
+          <div
+            class="flex flex-col gap-2 p-4 rounded-2xl bg-surface border shadow-understory"
+          >
+            <h3
+              class="text-xs font-semibold uppercase tracking-wider text-content-muted m-0"
+            >
               Offizielle Daten (BayernAtlas)
             </h3>
             <p class="text-xs text-content-muted m-0">
-              Einzelbaum-Punkte aus dem amtlichen Datensatz für dieses Waldstück.
+              Einzelbaum-Punkte aus dem amtlichen Datensatz für dieses
+              Waldstück.
             </p>
             <div class="grid grid-cols-2 gap-2">
               <button
@@ -1073,7 +1421,9 @@
               >
                 <Tree size="1.125em" />
                 <span class="truncate">
-                  {officialTreesLoading ? "Lade…" : officialTreesVisible ? "Punkte aus" : "Baum-Punkte"}
+                  {officialTreesLoading ? "Lade…"
+                  : officialTreesVisible ? "Punkte aus"
+                  : "Bäume makieren"}
                 </span>
               </button>
               <button
@@ -1086,15 +1436,241 @@
               </button>
             </div>
             {#if treeActionError}
-              <div class="rounded-btn bg-surface-muted border px-3 py-2 text-xs text-crimson">
+              <div
+                class="rounded-btn bg-surface-muted border px-3 py-2 text-xs text-crimson"
+              >
                 {treeActionError}
               </div>
             {/if}
             {#if treeCountResult != null}
-              <div class="rounded-btn bg-surface-muted border px-3 py-2 text-xs text-content">
+              <div
+                class="rounded-btn bg-surface-muted border px-3 py-2 text-xs text-content"
+              >
                 Offiziell gezählt: <strong>{treeCountResult}</strong> Bäume
               </div>
             {/if}
+          </div>
+
+          <!-- Grenzsteine -->
+          <div
+            class="flex flex-col gap-2 p-4 rounded-2xl bg-surface border shadow-understory"
+          >
+            <h3
+              class="text-xs font-semibold uppercase tracking-wider text-content-muted m-0"
+            >
+              Grenzsteine ({boundaryStonesForActive.length})
+            </h3>
+            <p class="text-xs text-content-muted m-0">
+              Foto, Beschreibung und (optional) Standort jedes Grenzsteins.
+            </p>
+
+            {#if boundaryStonesForActive.length > 0}
+              <ul class="flex flex-col gap-2 list-none p-0 m-0">
+                {#each boundaryStonesForActive as st (st.id)}
+                  <li
+                    class="flex gap-3 items-start border border-hairline rounded-btn p-3 bg-earth"
+                  >
+                    {#if st.url}
+                      <a
+                        href={st.url}
+                        target="_blank"
+                        rel="noopener"
+                        class="block flex-shrink-0"
+                      >
+                        <img
+                          src={st.url}
+                          alt="Grenzstein"
+                          class="w-20 h-20 object-cover rounded-btn border"
+                        />
+                      </a>
+                    {:else}
+                      <div
+                        class="w-20 h-20 rounded-btn border border-dashed grid place-items-center text-content-faint flex-shrink-0"
+                      >
+                        <Camera size="1.25em" />
+                      </div>
+                    {/if}
+                    <div class="flex-1 min-w-0 flex flex-col gap-2">
+                      {#if stoneEditing[st.id] !== undefined}
+                        <textarea
+                          class="w-full px-3 py-2 min-h-[64px] rounded-btn border bg-surface text-[0.9rem] text-ink focus:outline-none focus:border-pine focus:shadow-ring-focus transition"
+                          rows="3"
+                          bind:value={stoneEditing[st.id]}
+                        ></textarea>
+                        <div class="flex gap-2">
+                          <button
+                            class="px-3 py-1.5 min-h-[36px] rounded-btn text-earth border font-semibold text-xs"
+                            style="background: linear-gradient(180deg, var(--color-pine), var(--color-pine-deep)); border-color: var(--color-pine-deep);"
+                            onclick={() => saveStoneEdit(st.id)}
+                          >
+                            Speichern
+                          </button>
+                          <button
+                            class="px-3 py-1.5 min-h-[36px] rounded-btn bg-surface border text-content text-xs font-semibold"
+                            onclick={() => cancelStoneEdit(st.id)}
+                          >
+                            Abbrechen
+                          </button>
+                        </div>
+                      {:else}
+                        <p
+                          class="text-sm text-ink whitespace-pre-wrap leading-snug min-h-[1em] m-0"
+                        >
+                          {st.description?.trim() || "— keine Beschreibung —"}
+                        </p>
+                      {/if}
+
+                      <div
+                        class="flex flex-wrap items-center gap-2 text-xs text-content-muted"
+                      >
+                        {#if st.latitude !== null && st.longitude !== null}
+                          <span
+                            class="inline-flex items-center gap-1 font-mono"
+                          >
+                            <MapTrifold size="0.875em" />
+                            {st.latitude.toFixed(5)}, {st.longitude.toFixed(5)}
+                            {#if st.gpsAccuracyM != null}· ±{st.gpsAccuracyM.toFixed(
+                                0
+                              )} m{/if}
+                          </span>
+                        {:else}
+                          <span class="italic">ohne Standort</span>
+                        {/if}
+                      </div>
+
+                      {#if stoneEditing[st.id] === undefined}
+                        <div class="flex gap-2">
+                          <button
+                            class="inline-flex items-center gap-1 px-2 py-1 min-h-[32px] rounded-btn border text-content text-xs hover:border-pine transition"
+                            onclick={() =>
+                              startStoneEdit(st.id, st.description)}
+                          >
+                            <PencilSimple size="0.875em" /> Beschreibung
+                          </button>
+                          <button
+                            class="inline-flex items-center gap-1 px-2 py-1 min-h-[32px] rounded-btn border text-crimson text-xs hover:border-crimson transition"
+                            onclick={() => removeStone(st.id)}
+                          >
+                            <Trash size="0.875em" /> Löschen
+                          </button>
+                        </div>
+                      {/if}
+                    </div>
+                  </li>
+                {/each}
+              </ul>
+            {/if}
+
+            <div
+              class="border border-dashed border-hairline rounded-btn p-4 flex flex-col gap-3"
+            >
+              <span class="eyebrow">Neuer Grenzstein</span>
+              {#if stoneError}
+                <div
+                  class="rounded-btn bg-surface-muted border px-3 py-2 text-xs text-crimson"
+                >
+                  {stoneError}
+                </div>
+              {/if}
+
+              {#if stonePreview}
+                <img
+                  src={stonePreview}
+                  alt="Vorschau"
+                  class="w-full max-w-[240px] h-auto rounded-btn border self-start"
+                />
+              {/if}
+
+              <label
+                class="inline-flex items-center justify-center gap-2 px-3 py-2 min-h-[44px] rounded-btn bg-surface border text-ink text-sm font-semibold cursor-pointer hover:border-pine transition self-start"
+              >
+                <Camera size="1em" />
+                {stonePreview ? "Anderes Foto" : "Foto auswählen"}
+                <input
+                  type="file"
+                  accept="image/*"
+                  capture="environment"
+                  class="sr-only"
+                  onchange={pickStoneFile}
+                />
+              </label>
+
+              {#if stoneCaptureGps && (stoneGpsCapturing || stoneGps)}
+                <div class="text-xs text-content-muted">
+                  {#if stoneGpsCapturing}
+                    GPS wird ermittelt …
+                  {:else if stoneGps}
+                    Standort:
+                    <span class="font-mono"
+                      >{stoneGps.lat.toFixed(5)}, {stoneGps.lng.toFixed(
+                        5
+                      )}</span
+                    >
+                    · ±{stoneGps.acc.toFixed(0)} m
+                  {/if}
+                </div>
+              {/if}
+
+              <textarea
+                class="w-full px-3 py-2 min-h-[64px] rounded-btn border bg-surface text-[0.9rem] text-ink focus:outline-none focus:border-pine focus:shadow-ring-focus transition"
+                rows="2"
+                placeholder="Beschreibung (z. B. Lage, Markierungen)"
+                bind:value={stoneDescription}
+              ></textarea>
+
+              <label
+                class="flex items-center gap-2 text-xs text-content cursor-pointer"
+              >
+                <input
+                  type="checkbox"
+                  class="checkbox checkbox-sm"
+                  bind:checked={stoneCaptureGps}
+                />
+                <span>Aktuellen Standort mitspeichern</span>
+              </label>
+
+              <div class="flex gap-2">
+                <button
+                  class="inline-flex items-center gap-2 px-4 py-2 min-h-[40px] rounded-btn text-earth border font-semibold text-sm shadow-duff transition hover:-translate-y-px hover:shadow-understory disabled:opacity-70 disabled:cursor-not-allowed"
+                  style="background: linear-gradient(180deg, var(--color-pine), var(--color-pine-deep)); border-color: var(--color-pine-deep);"
+                  onclick={submitStone}
+                  disabled={stoneSubmitting || !stoneFile}
+                >
+                  <Plus size="1em" weight="bold" />
+                  {stoneSubmitting ? "Speichern …" : "Hinzufügen"}
+                </button>
+                {#if stoneFile}
+                  <button
+                    class="inline-flex items-center gap-2 px-3 py-2 min-h-[40px] rounded-btn bg-surface border text-content text-sm font-semibold"
+                    onclick={clearStoneDraft}
+                  >
+                    Verwerfen
+                  </button>
+                {/if}
+              </div>
+            </div>
+          </div>
+
+          <!-- Aktionen -->
+          <div
+            class="flex flex-col gap-2 p-4 rounded-2xl bg-surface border shadow-understory"
+          >
+            <h3
+              class="text-xs font-semibold uppercase tracking-wider text-content-muted m-0"
+            >
+              Aktionen
+            </h3>
+            <p class="text-xs text-content-muted m-0">
+              Das Löschen entfernt alle zugehörigen Daten unwiderruflich.
+            </p>
+            <button
+              class="inline-flex items-center justify-center gap-2 px-4 py-3 min-h-[48px] rounded-btn font-semibold text-sm text-earth border transition hover:-translate-y-px hover:shadow-understory"
+              style="background: var(--color-crimson); border-color: color-mix(in srgb, var(--color-crimson) 75%, black);"
+              onclick={deleteActivePlot}
+            >
+              <Trash size="1em" weight="bold" />
+              Waldstück löschen
+            </button>
           </div>
         </article>
       {/if}
@@ -1111,7 +1687,8 @@
                 {treesForActive.length} erfasst
               </h2>
               <p class="text-xs text-content-muted">
-                Tippe auf das Kamera-Symbol oben, um einen Baum mit GPS aufzunehmen.
+                Tippe auf das Kamera-Symbol oben, um einen Baum mit GPS
+                aufzunehmen.
               </p>
             </div>
             <button
@@ -1124,7 +1701,9 @@
           </header>
 
           {#if treesForActive.length === 0}
-            <div class="rounded-2xl border border-dashed bg-surface-muted px-4 py-6 text-center">
+            <div
+              class="rounded-2xl border border-dashed bg-surface-muted px-4 py-6 text-center"
+            >
               <p class="text-sm text-content-muted m-0">
                 Noch keine Bäume erfasst.
               </p>
@@ -1135,28 +1714,30 @@
                 <li
                   class="flex items-center justify-between gap-3 px-3 py-2 rounded-btn border transition"
                   class:bg-surface-muted={!selectedTreeIds[t.id]}
-                  style={selectedTreeIds[t.id]
-                    ? "background: color-mix(in srgb, var(--color-ember) 14%, var(--color-surface)); border-color: var(--color-rust);"
-                    : ""}
+                  style={selectedTreeIds[t.id] ?
+                    "background: color-mix(in srgb, var(--color-ember) 14%, var(--color-surface)); border-color: var(--color-rust);"
+                  : ""}
                 >
                   <div class="flex items-center gap-2 min-w-0">
                     <span
                       class="inline-block w-2.5 h-2.5 rounded-full flex-shrink-0"
-                      style="background: {t.healthStatus === 'healthy'
-                        ? '#5d7a4a'
-                        : t.healthStatus === 'must-watch'
-                          ? '#d4a23c'
-                          : t.healthStatus === 'infected'
-                            ? '#c76a2b'
-                            : '#4a4a4a'};"
+                      style="background: {t.healthStatus === 'healthy' ?
+                        '#5d7a4a'
+                      : t.healthStatus === 'must-watch' ? '#d4a23c'
+                      : t.healthStatus === 'infected' ? '#c76a2b'
+                      : '#4a4a4a'};"
                       aria-hidden="true"
                     ></span>
                     <span class="text-sm text-ink font-medium truncate">
-                      {TREE_TYPE_LABELS[t.treeTypeId as keyof typeof TREE_TYPE_LABELS] ?? t.treeTypeId}
+                      {TREE_TYPE_LABELS[
+                        t.treeTypeId as keyof typeof TREE_TYPE_LABELS
+                      ] ?? t.treeTypeId}
                     </span>
                   </div>
                   <span class="text-xs text-content-muted whitespace-nowrap">
-                    {HEALTH_LABELS[t.healthStatus as keyof typeof HEALTH_LABELS] ?? t.healthStatus}
+                    {HEALTH_LABELS[
+                      t.healthStatus as keyof typeof HEALTH_LABELS
+                    ] ?? t.healthStatus}
                   </span>
                 </li>
               {/each}
@@ -1177,7 +1758,8 @@
                 {areasForActive.length} markiert
               </h2>
               <p class="text-xs text-content-muted">
-                Eine Fläche umkreisen — z.B. Sturmschaden oder befallener Abschnitt.
+                Eine Fläche umkreisen — z.B. Sturmschaden oder befallener
+                Abschnitt.
               </p>
             </div>
             <button
@@ -1191,7 +1773,9 @@
           </header>
 
           {#if areaActionError}
-            <div class="rounded-btn bg-surface-muted border px-3 py-2 text-xs text-crimson">
+            <div
+              class="rounded-btn bg-surface-muted border px-3 py-2 text-xs text-crimson"
+            >
               {areaActionError}
             </div>
           {/if}
@@ -1220,7 +1804,9 @@
           {/if}
 
           {#if areasForActive.length === 0}
-            <div class="rounded-2xl border border-dashed bg-surface-muted px-4 py-6 text-center">
+            <div
+              class="rounded-2xl border border-dashed bg-surface-muted px-4 py-6 text-center"
+            >
               <p class="text-sm text-content-muted m-0">
                 Noch keine Bereiche markiert.
               </p>
@@ -1232,9 +1818,9 @@
                 <li
                   class="flex items-stretch gap-2 rounded-btn border transition overflow-hidden"
                   class:bg-surface-muted={a.id !== selectedAreaId}
-                  style={a.id === selectedAreaId
-                    ? "background: color-mix(in srgb, var(--color-ember) 14%, var(--color-surface)); border-color: var(--color-rust);"
-                    : ""}
+                  style={a.id === selectedAreaId ?
+                    "background: color-mix(in srgb, var(--color-ember) 14%, var(--color-surface)); border-color: var(--color-rust);"
+                  : ""}
                 >
                   <button
                     class="flex-1 min-w-0 flex flex-col items-start gap-0.5 bg-transparent border-0 px-3 py-2 text-left"
@@ -1250,28 +1836,37 @@
                       <span class="text-sm text-ink font-medium truncate">
                         Bereich {String(i + 1).padStart(2, "0")}
                       </span>
-                      <span class="text-xs text-content-muted whitespace-nowrap">
-                        · {inside} {inside === 1 ? "Baum" : "Bäume"}
+                      <span
+                        class="text-xs text-content-muted whitespace-nowrap"
+                      >
+                        · {inside}
+                        {inside === 1 ? "Baum" : "Bäume"}
                       </span>
                     </div>
                     {#if a.appliedTreeStatus || a.comment}
-                      <div class="flex items-center gap-2 mt-0.5 max-w-full min-w-0">
+                      <div
+                        class="flex items-center gap-2 mt-0.5 max-w-full min-w-0"
+                      >
                         {#if a.appliedTreeStatus}
                           <span
                             class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-pill text-[0.6875rem] font-semibold flex-shrink-0"
-                            style="background: {a.appliedTreeStatus === 'healthy'
-                              ? '#5d7a4a'
-                              : a.appliedTreeStatus === 'must-watch'
-                                ? '#d4a23c'
-                                : a.appliedTreeStatus === 'infected'
-                                  ? '#c76a2b'
-                                  : '#4a4a4a'}; color: #fff;"
+                            style="background: {(
+                              a.appliedTreeStatus === 'healthy'
+                            ) ?
+                              '#5d7a4a'
+                            : a.appliedTreeStatus === 'must-watch' ? '#d4a23c'
+                            : a.appliedTreeStatus === 'infected' ? '#c76a2b'
+                            : '#4a4a4a'}; color: #fff;"
                           >
-                            {HEALTH_LABELS[a.appliedTreeStatus as keyof typeof HEALTH_LABELS] ?? a.appliedTreeStatus}
+                            {HEALTH_LABELS[
+                              a.appliedTreeStatus as keyof typeof HEALTH_LABELS
+                            ] ?? a.appliedTreeStatus}
                           </span>
                         {/if}
                         {#if a.comment}
-                          <span class="text-xs text-content-muted truncate min-w-0">
+                          <span
+                            class="text-xs text-content-muted truncate min-w-0"
+                          >
                             {a.comment}
                           </span>
                         {/if}

@@ -11,14 +11,14 @@
   // The component manages a temporary `route-draft` GeoJSON layer on the
   // shared MapLibre instance so the line is visible *under* this overlay.
   // On unmount, it cleans the layer and re-enables map gestures.
-  import maplibregl from 'maplibre-gl';
-  import { untrack } from 'svelte';
-  import { X, Check, ArrowCounterClockwise } from 'phosphor-svelte';
+  import maplibregl from "maplibre-gl";
+  import { untrack } from "svelte";
+  import { X, Check, ArrowCounterClockwise } from "phosphor-svelte";
   import {
     ROUTE_TYPE_LABELS,
     type RouteType,
-    type VehicleType
-  } from '$lib/enums';
+    type VehicleType,
+  } from "$lib/enums";
 
   interface Props {
     mlMap: maplibregl.Map;
@@ -30,21 +30,21 @@
       name: string | null;
       comment: string | null;
       pathData:
-        | { type: 'LineString'; coordinates: [number, number][] }
-        | { type: 'MultiLineString'; coordinates: [number, number][][] };
+        | { type: "LineString"; coordinates: [number, number][] }
+        | { type: "MultiLineString"; coordinates: [number, number][][] };
     }) => Promise<void>;
   }
 
   let { mlMap, initialType, onCancel, onSave }: Props = $props();
 
-  type Phase = 'drawing' | 'form' | 'saving';
-  let phase = $state<Phase>('drawing');
+  type Phase = "drawing" | "form" | "saving";
+  let phase = $state<Phase>("drawing");
   // Local form fields seeded from the prop once, then edited locally — see
   // CLAUDE.md ("Default to `$derived` … unless …form fields with `bind:value`").
   // The user can switch Typ inside the sheet without us snapping it back.
   let routeType = $state<RouteType>(untrack(() => initialType));
-  let name = $state('');
-  let comment = $state('');
+  let name = $state("");
+  let comment = $state("");
   // Current stroke; committed strokes live in `lines` (see pointerUp).
   let path = $state<[number, number][]>([]);
   let lines = $state<[number, number][][]>([]);
@@ -52,67 +52,67 @@
 
   // Only two combined options → vehicle type is implied.
   const vehicleType = $derived<VehicleType>(
-    routeType === 'rueckegasse' ? 'kleingerät' : 'großgerät'
+    routeType === "rueckegasse" ? "kleingerät" : "großgerät"
   );
   const routeTypeLabel = $derived(
-    routeType === 'rueckegasse' ? 'Rückegasse (Traktor)' : 'Straße (LKW)'
+    routeType === "rueckegasse" ? "Rückegasse (Traktor)" : "Straße (LKW)"
   );
 
-  const SOURCE_ID = 'route-draft';
-  const LAYER_SOLID_A = 'route-draft-solid-a';
-  const LAYER_SOLID_B = 'route-draft-solid-b';
-  const LAYER_DASHED_A = 'route-draft-dashed-a';
-  const LAYER_DASHED_B = 'route-draft-dashed-b';
+  const SOURCE_ID = "route-draft";
+  const LAYER_SOLID_A = "route-draft-solid-a";
+  const LAYER_SOLID_B = "route-draft-solid-b";
+  const LAYER_DASHED_A = "route-draft-dashed-a";
+  const LAYER_DASHED_B = "route-draft-dashed-b";
 
   function ensureLayer() {
     if (mlMap.getSource(SOURCE_ID)) return;
     mlMap.addSource(SOURCE_ID, {
-      type: 'geojson',
-      data: { type: 'FeatureCollection', features: [] }
+      type: "geojson",
+      data: { type: "FeatureCollection", features: [] },
     });
     const basePaint = {
-      'line-color': '#2563eb',
-      'line-opacity': 0.95,
-      'line-width': 2
+      "line-color": "#2563eb",
+      "line-opacity": 0.95,
+      "line-width": 2,
     };
-    const offsetA = { ...basePaint, 'line-offset': -2 };
-    const offsetB = { ...basePaint, 'line-offset': 2 };
+    const offsetA = { ...basePaint, "line-offset": -2 };
+    const offsetB = { ...basePaint, "line-offset": 2 };
     const dashedA = {
       ...offsetA,
-      'line-dasharray': [2, 2]
+      "line-dasharray": [2, 2],
     };
     const dashedB = {
       ...offsetB,
-      'line-dasharray': [2, 2]
+      "line-dasharray": [2, 2],
     };
 
     mlMap.addLayer({
       id: LAYER_SOLID_A,
-      type: 'line',
+      type: "line",
       source: SOURCE_ID,
-      layout: { visibility: 'visible' },
-      paint: offsetA
+      layout: { visibility: "visible" },
+      paint: offsetA,
     });
     mlMap.addLayer({
       id: LAYER_SOLID_B,
-      type: 'line',
+      type: "line",
       source: SOURCE_ID,
-      layout: { visibility: 'visible' },
-      paint: offsetB
+      layout: { visibility: "visible" },
+      paint: offsetB,
     });
     mlMap.addLayer({
       id: LAYER_DASHED_A,
-      type: 'line',
+      type: "line",
       source: SOURCE_ID,
-      layout: { visibility: 'none' },
-      paint: dashedA
+      layout: { visibility: "none" },
+      paint: dashedA,
     });
     mlMap.addLayer({
       id: LAYER_DASHED_B,
-      type: 'line',
+      type: "line",
       source: SOURCE_ID,
-      layout: { visibility: 'none' },
-      paint: dashedB
+      layout: { visibility: "none" },
+      paint: dashedB,
     });
   }
 
@@ -120,28 +120,35 @@
     if (coords.length < 2) return [];
     return [
       {
-        type: 'Feature' as const,
+        type: "Feature" as const,
         properties: {},
-        geometry: { type: 'LineString' as const, coordinates: coords }
-      }
+        geometry: { type: "LineString" as const, coordinates: coords },
+      },
     ];
   }
 
   function updatePreview() {
-    const src = mlMap.getSource(SOURCE_ID) as maplibregl.GeoJSONSource | undefined;
+    const src = mlMap.getSource(SOURCE_ID) as
+      | maplibregl.GeoJSONSource
+      | undefined;
     if (!src) return;
     const fromCommitted = lines.flatMap((c) => lineFeatures(c));
     const current = lineFeatures(path);
     const features = [...fromCommitted, ...current];
     if (features.length === 0) {
-      src.setData({ type: 'FeatureCollection', features: [] });
+      src.setData({ type: "FeatureCollection", features: [] });
       return;
     }
-    src.setData({ type: 'FeatureCollection', features });
+    src.setData({ type: "FeatureCollection", features });
   }
 
   function clearPreview() {
-    for (const id of [LAYER_SOLID_A, LAYER_SOLID_B, LAYER_DASHED_A, LAYER_DASHED_B]) {
+    for (const id of [
+      LAYER_SOLID_A,
+      LAYER_SOLID_B,
+      LAYER_DASHED_A,
+      LAYER_DASHED_B,
+    ]) {
       if (mlMap.getLayer(id)) mlMap.removeLayer(id);
     }
     if (mlMap.getSource(SOURCE_ID)) mlMap.removeSource(SOURCE_ID);
@@ -168,8 +175,8 @@
   }
 
   function onPointerDown(e: PointerEvent) {
-    if (phase !== 'drawing') return;
-    if (e.pointerType === 'mouse' && e.button !== 0) return;
+    if (phase !== "drawing") return;
+    if (e.pointerType === "mouse" && e.button !== 0) return;
     drawing = true;
     try {
       canvas?.setPointerCapture(e.pointerId);
@@ -219,7 +226,7 @@
       mlMap.doubleClickZoom,
       mlMap.touchZoomRotate,
       mlMap.boxZoom,
-      mlMap.dragRotate
+      mlMap.dragRotate,
     ];
     for (const h of handlers) h.disable();
 
@@ -230,18 +237,18 @@
     // "only places a dot" in mobile emulation. Disable browser-handled
     // gestures while the tool is mounted; restore on teardown.
     const prevTouchAction = canvas.style.touchAction;
-    canvas.style.touchAction = 'none';
+    canvas.style.touchAction = "none";
 
-    canvas.addEventListener('pointerdown', onPointerDown);
-    canvas.addEventListener('pointermove', onPointerMove);
-    canvas.addEventListener('pointerup', onPointerUp);
-    canvas.addEventListener('pointercancel', onPointerUp);
+    canvas.addEventListener("pointerdown", onPointerDown);
+    canvas.addEventListener("pointermove", onPointerMove);
+    canvas.addEventListener("pointerup", onPointerUp);
+    canvas.addEventListener("pointercancel", onPointerUp);
 
     return () => {
-      canvas?.removeEventListener('pointerdown', onPointerDown);
-      canvas?.removeEventListener('pointermove', onPointerMove);
-      canvas?.removeEventListener('pointerup', onPointerUp);
-      canvas?.removeEventListener('pointercancel', onPointerUp);
+      canvas?.removeEventListener("pointerdown", onPointerDown);
+      canvas?.removeEventListener("pointermove", onPointerMove);
+      canvas?.removeEventListener("pointerup", onPointerUp);
+      canvas?.removeEventListener("pointercancel", onPointerUp);
       if (canvas) canvas.style.touchAction = prevTouchAction;
       for (const h of handlers) h.enable();
       clearPreview();
@@ -250,12 +257,14 @@
 
   $effect(() => {
     // Toggle solid vs dashed preview depending on the chosen route type.
-    const dashed = routeType === 'rueckegasse';
+    const dashed = routeType === "rueckegasse";
     for (const id of [LAYER_DASHED_A, LAYER_DASHED_B]) {
-      if (mlMap.getLayer(id)) mlMap.setLayoutProperty(id, 'visibility', dashed ? 'visible' : 'none');
+      if (mlMap.getLayer(id))
+        mlMap.setLayoutProperty(id, "visibility", dashed ? "visible" : "none");
     }
     for (const id of [LAYER_SOLID_A, LAYER_SOLID_B]) {
-      if (mlMap.getLayer(id)) mlMap.setLayoutProperty(id, 'visibility', dashed ? 'none' : 'visible');
+      if (mlMap.getLayer(id))
+        mlMap.setLayoutProperty(id, "visibility", dashed ? "none" : "visible");
     }
   });
 
@@ -263,51 +272,51 @@
     path = [];
     lines = [];
     updatePreview();
-    phase = 'drawing';
+    phase = "drawing";
   }
 
   function accept() {
     if (lines.length === 0) return;
     saveError = null;
-    phase = 'form';
+    phase = "form";
   }
 
   function pathDataFromLines() {
     if (lines.length === 0) {
-      throw new Error('Kein Weg gezeichnet.');
+      throw new Error("Kein Weg gezeichnet.");
     }
     if (lines.length === 1) {
-      return { type: 'LineString' as const, coordinates: lines[0] };
+      return { type: "LineString" as const, coordinates: lines[0] };
     }
-    return { type: 'MultiLineString' as const, coordinates: lines };
+    return { type: "MultiLineString" as const, coordinates: lines };
   }
 
   async function submit() {
     saveError = null;
-    phase = 'saving';
+    phase = "saving";
     try {
       await onSave({
         routeType,
         vehicleType,
         name: name.trim() || null,
         comment: comment.trim() || null,
-        pathData: pathDataFromLines()
+        pathData: pathDataFromLines(),
       });
     } catch (e) {
-      saveError = e instanceof Error ? e.message : 'Speichern fehlgeschlagen.';
-      phase = 'form';
+      saveError = e instanceof Error ? e.message : "Speichern fehlgeschlagen.";
+      phase = "form";
     }
   }
 </script>
 
-{#if phase === 'drawing'}
+{#if phase === "drawing"}
   <!-- Top banner — mirrors the Baum-Platzieren banner style. -->
   <div
     class="absolute left-1/2 -translate-x-1/2 z-30 inline-flex items-center gap-3 pl-4 pr-2 py-2 rounded-pill text-earth font-medium text-sm shadow-canopy animate-rise pointer-events-auto"
     style="top: calc(0.75rem + env(safe-area-inset-top)); background: var(--color-pine-deep);"
   >
     <span class="w-2 h-2 rounded-full bg-ember animate-breathe"></span>
-    <span>Weg zeichnen — Strich {lines.length + 1} mit dem Finger zeichnen</span>
+    <span>Striche mit dem Finger zeichnen</span>
     <button
       class="w-7 h-7 min-h-0 min-w-0 grid place-items-center rounded-full text-earth border-0"
       style="background: color-mix(in srgb, var(--color-earth) 14%, transparent);"
@@ -342,7 +351,7 @@
   </div>
 {/if}
 
-{#if phase === 'form' || phase === 'saving'}
+{#if phase === "form" || phase === "saving"}
   <!-- Backdrop — clicking it doesn't dismiss; users must use Abbrechen so
        they can't lose the freshly drawn path by accident. -->
   <div
@@ -371,7 +380,7 @@
         <button
           class="w-9 h-9 min-h-0 min-w-0 grid place-items-center rounded-full bg-transparent border text-content-muted hover:text-ink hover:border-pine"
           onclick={onCancel}
-          disabled={phase === 'saving'}
+          disabled={phase === "saving"}
           aria-label="Abbrechen"
         >
           <X size="1em" weight="bold" />
@@ -383,7 +392,7 @@
         <select
           class="px-3 py-2.5 min-h-[42px] rounded-btn bg-earth border text-ink text-sm focus:outline-none focus:border-pine"
           bind:value={routeType}
-          disabled={phase === 'saving'}
+          disabled={phase === "saving"}
         >
           <option value="rueckegasse">Rückegasse (Traktor)</option>
           <option value="anfahrt">Straße (LKW)</option>
@@ -391,26 +400,35 @@
       </label>
 
       <label class="flex flex-col gap-1.5 text-sm">
-        <span class="font-semibold text-ink">Name <span class="text-content-muted font-normal">(optional)</span></span>
+        <span class="font-semibold text-ink"
+          >Name <span class="text-content-muted font-normal">(optional)</span
+          ></span
+        >
         <input
           type="text"
           class="px-3 py-2.5 min-h-[42px] rounded-btn bg-earth border text-ink text-sm focus:outline-none focus:border-pine"
-          placeholder={routeType === 'rueckegasse' ? 'z.B. Gasse Nord' : 'z.B. Von der Landstraße'}
+          placeholder={routeType === "rueckegasse" ? "z.B. Gasse Nord" : (
+            "z.B. Von der Landstraße"
+          )}
           maxlength="120"
           bind:value={name}
-          disabled={phase === 'saving'}
+          disabled={phase === "saving"}
         />
       </label>
 
       <label class="flex flex-col gap-1.5 text-sm">
-        <span class="font-semibold text-ink">Kommentar <span class="text-content-muted font-normal">(optional)</span></span>
+        <span class="font-semibold text-ink"
+          >Kommentar <span class="text-content-muted font-normal"
+            >(optional)</span
+          ></span
+        >
         <textarea
           class="px-3 py-2.5 min-h-[88px] rounded-btn bg-earth border text-ink text-sm focus:outline-none focus:border-pine resize-y"
           placeholder="z.B. Im Winter unpassierbar. Schranke, Schlüssel beim Nachbarn."
           maxlength="2000"
           rows="3"
           bind:value={comment}
-          disabled={phase === 'saving'}
+          disabled={phase === "saving"}
         ></textarea>
       </label>
 
@@ -422,7 +440,7 @@
         <button
           class="inline-flex items-center justify-center px-4 py-2.5 min-h-[44px] rounded-pill bg-transparent border text-ink font-semibold text-sm hover:border-pine"
           onclick={onCancel}
-          disabled={phase === 'saving'}
+          disabled={phase === "saving"}
         >
           Abbrechen
         </button>
@@ -430,9 +448,9 @@
           class="inline-flex items-center justify-center px-5 py-2.5 min-h-[44px] rounded-pill text-earth border font-semibold text-sm shadow-understory disabled:opacity-60"
           style="background: var(--color-pine); border-color: color-mix(in srgb, var(--color-pine) 70%, black);"
           onclick={submit}
-          disabled={phase === 'saving'}
+          disabled={phase === "saving"}
         >
-          {phase === 'saving' ? 'Speichere…' : 'Speichern'}
+          {phase === "saving" ? "Speichere…" : "Speichern"}
         </button>
       </div>
     </div>
