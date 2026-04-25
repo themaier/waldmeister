@@ -1,7 +1,9 @@
 <script lang="ts">
   import { authClient } from '$lib/auth-client';
-  import { goto } from '$app/navigation';
+  import { goto, invalidateAll } from '$app/navigation';
   import { Tree, ArrowRight } from 'phosphor-svelte';
+  import Mascot from '$lib/components/Mascot.svelte';
+  import FallingLeaves from '$lib/components/FallingLeaves.svelte';
 
   let email = $state('');
   let password = $state('');
@@ -17,6 +19,7 @@
       if (res.error) {
         error = res.error.message ?? 'Anmeldung fehlgeschlagen.';
       } else {
+        await invalidateAll();
         await goto('/');
       }
     } catch (err) {
@@ -27,9 +30,16 @@
   }
 </script>
 
-<div class="lodge-bg grid grid-cols-1 lg:grid-cols-[1.05fr_1fr] min-h-dvh">
+<div class="lodge-bg grid grid-cols-1 lg:grid-cols-[1.05fr_1fr] min-h-dvh relative">
+  <!-- Mascot (desktop only) — sits at grid level, behind aside text and behind the form modal -->
+  <Mascot
+    track
+    class="hidden lg:block pointer-events-none select-none absolute"
+    style="bottom: 0; left: clamp(0rem, 6vw, 9rem); height: 84%; aspect-ratio: 480 / 800; z-index: 5;"
+  />
+
   <!-- Editorial aside -->
-  <aside class="hidden lg:flex flex-col gap-8 p-10 relative z-[1] text-earth">
+  <aside class="hidden lg:flex flex-col gap-8 p-10 relative z-[20] text-earth">
     <div class="flex items-center gap-3">
       <span
         class="w-10 h-10 grid place-items-center rounded-btn text-leaf border"
@@ -86,8 +96,11 @@
   </aside>
 
   <!-- Form -->
-  <main class="grid place-items-center p-5 bg-earth relative z-[1]">
-    <div class="grain relative w-full max-w-[26rem] bg-surface border rounded-box shadow-canopy px-6 pt-8 pb-5 flex flex-col gap-5 animate-rise">
+  <main class="grid place-items-center p-5 bg-earth relative overflow-hidden">
+    <!-- Falling leaves layer — visible on mobile + desktop, behind the dialog -->
+    <FallingLeaves />
+
+    <div class="grain relative z-[10] w-full max-w-[26rem] bg-surface border rounded-box shadow-canopy px-6 pt-8 pb-5 flex flex-col gap-5 animate-rise">
       <div
         class="absolute -top-5 left-1/2 -translate-x-1/2 w-12 h-12 grid place-items-center rounded-btn text-ember border shadow-understory"
         style="background: linear-gradient(180deg, var(--color-pine), var(--color-pine-deep)); border-color: var(--color-pine-deep);"

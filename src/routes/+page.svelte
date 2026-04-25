@@ -3,8 +3,10 @@
   // One persistent MapLibre instance; we switch "active" plot by flying the
   // camera rather than navigating routes.
 
+  import { onMount } from "svelte";
   import { goto } from "$app/navigation";
   import { invalidateAll } from "$app/navigation";
+  import { activePlotStore } from "$lib/stores/active-plot.svelte";
   import Map from "$lib/components/Map.svelte";
   import PlotSwitcher from "$lib/components/PlotSwitcher.svelte";
   import OnboardingCard from "$lib/components/OnboardingCard.svelte";
@@ -48,14 +50,20 @@
   let { data }: { data: PageData & { plots: any[]; parcels: any[] } } =
     $props();
 
+  // Seed the session store from the load-resolved `?plot=ID` (set by the
+  // Waldstück-creation redirect). Synchronous init — runs once on mount,
+  // which matches the only entry path: a fresh navigation from /waldstuecke/neu.
+  onMount(() => {
+    if (data.requestedPlotId) activePlotStore.set(data.requestedPlotId);
+  });
+
   let mapRef = $state<Map | undefined>();
-  // Manual selection wins while the plot still exists; otherwise we fall back
-  // to the first plot from the load data so that activePlotId auto-heals when
-  // the current plot is deleted or the data is invalidated.
-  let manualPlotId = $state<string | null>(null);
+  // Remembered selection (session-scoped store) wins while the plot still
+  // exists; otherwise we fall back to the first plot from the load data so
+  // that activePlotId auto-heals when the current plot is deleted.
   const activePlotId = $derived(
-    manualPlotId && data.plots.some((p) => p.id === manualPlotId) ?
-      manualPlotId
+    activePlotStore.id && data.plots.some((p) => p.id === activePlotStore.id) ?
+      activePlotStore.id
     : (data.plots[0]?.id ?? null)
   );
   let placementMode = $state(false);
@@ -863,7 +871,7 @@
       tapToast = { targetPlotId: plotId };
       return;
     }
-    manualPlotId = plotId;
+    activePlotStore.set(plotId);
     updateParcelFeatures();
     await loadActivePlotLayers(plotId);
     fitToPlot(plotId);

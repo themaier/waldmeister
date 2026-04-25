@@ -8,12 +8,10 @@ import { z } from 'zod';
 import { HEALTH_STATUSES, TREE_TYPES, TREE_LABELS } from '$lib/enums';
 
 export const load: PageServerLoad = async ({ locals }) => {
-  if (!locals.user) throw redirect(303, '/login');
-
   const plotRows = await db
     .select({ id: forestPlots.id, name: forestPlots.name })
     .from(forestPlots)
-    .where(eq(forestPlots.ownerId, locals.user.id))
+    .where(eq(forestPlots.ownerId, locals.user!.id))
     .orderBy(forestPlots.createdAt);
 
   if (plotRows.length === 0) {
@@ -127,7 +125,6 @@ function randomToken(): string {
 
 export const actions: Actions = {
   default: async ({ request, locals }) => {
-    if (!locals.user) throw redirect(303, '/login');
     const form = await request.formData();
     const raw = form.get('payload');
     if (typeof raw !== 'string') return fail(400, { error: 'Ungültige Eingabe.' });
@@ -144,7 +141,7 @@ export const actions: Actions = {
       const [plot] = await db
         .select({ id: forestPlots.id })
         .from(forestPlots)
-        .where(and(eq(forestPlots.id, parsed.selection.plotId), eq(forestPlots.ownerId, locals.user.id)))
+        .where(and(eq(forestPlots.id, parsed.selection.plotId), eq(forestPlots.ownerId, locals.user!.id)))
         .limit(1);
       if (!plot) return fail(404, { error: 'Waldstück nicht gefunden.' });
       const rows = await db.select({ id: trees.id }).from(trees).where(eq(trees.plotId, plot.id));
@@ -153,7 +150,7 @@ export const actions: Actions = {
       const [plot] = await db
         .select({ id: forestPlots.id })
         .from(forestPlots)
-        .where(and(eq(forestPlots.id, parsed.selection.plotId), eq(forestPlots.ownerId, locals.user.id)))
+        .where(and(eq(forestPlots.id, parsed.selection.plotId), eq(forestPlots.ownerId, locals.user!.id)))
         .limit(1);
       if (!plot) return fail(404, { error: 'Waldstück nicht gefunden.' });
 
@@ -185,7 +182,7 @@ export const actions: Actions = {
         .select({ id: trees.id })
         .from(trees)
         .innerJoin(forestPlots, eq(trees.plotId, forestPlots.id))
-        .where(and(inArray(trees.id, parsed.selection.treeIds), eq(forestPlots.ownerId, locals.user.id)));
+        .where(and(inArray(trees.id, parsed.selection.treeIds), eq(forestPlots.ownerId, locals.user!.id)));
       treeIds = rows.map((r) => r.id);
       if (treeIds.length === 0) return fail(400, { error: 'Keine gültigen Bäume ausgewählt.' });
     }
@@ -196,7 +193,7 @@ export const actions: Actions = {
     const [order] = await db
       .insert(workOrders)
       .values({
-        ownerId: locals.user.id,
+        ownerId: locals.user!.id,
         shareToken: randomToken(),
         shareExpiresAt,
         title: parsed.title,

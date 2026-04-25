@@ -1,4 +1,3 @@
-import { redirect } from '@sveltejs/kit';
 import type { PageServerLoad } from './$types';
 import { db } from '$lib/server/db';
 import { workOrders, workOrderTrees, trees } from '$lib/server/db/schema';
@@ -7,12 +6,10 @@ import { suggestPriority } from '$lib/priority';
 import { PRIORITY_ORDER, type Priority } from '$lib/enums';
 
 export const load: PageServerLoad = async ({ locals }) => {
-  if (!locals.user) throw redirect(303, '/login');
-
   const orders = await db
     .select()
     .from(workOrders)
-    .where(and(eq(workOrders.ownerId, locals.user.id), ne(workOrders.status, 'ARCHIVED')))
+    .where(and(eq(workOrders.ownerId, locals.user!.id), ne(workOrders.status, 'ARCHIVED')))
     .orderBy(desc(workOrders.createdAt));
 
   // Pull signals for the auto-priority suggestion.

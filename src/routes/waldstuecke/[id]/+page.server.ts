@@ -1,4 +1,4 @@
-import { error, redirect } from '@sveltejs/kit';
+import { error } from '@sveltejs/kit';
 import type { PageServerLoad } from './$types';
 import { db } from '$lib/server/db';
 import {
@@ -13,12 +13,10 @@ import { and, asc, eq, sql } from 'drizzle-orm';
 import { presignDownload } from '$lib/server/s3';
 
 export const load: PageServerLoad = async ({ locals, params }) => {
-  if (!locals.user) throw redirect(303, '/login');
-
   const [plot] = await db
     .select()
     .from(forestPlots)
-    .where(and(eq(forestPlots.id, params.id), eq(forestPlots.ownerId, locals.user.id)))
+    .where(and(eq(forestPlots.id, params.id), eq(forestPlots.ownerId, locals.user!.id)))
     .limit(1);
   if (!plot) throw error(404, 'Waldstück nicht gefunden.');
 
