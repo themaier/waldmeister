@@ -942,14 +942,6 @@
     if (parcelPlotId !== activePlotId) switchTo(parcelPlotId);
   }
 
-  function onLongPress(e: { lng: number; lat: number }) {
-    if (!activePlotId) return;
-    if (routeDrawType || areaDrawActive) return; // tool owns gestures
-    goto(
-      `/baeume/neu?plot=${activePlotId}&lat=${e.lat}&lng=${e.lng}${treeNeuFromQs}`
-    );
-  }
-
   function startPlacement() {
     placementMode = true;
   }
@@ -1087,7 +1079,6 @@
     <Map
       bind:this={mapRef}
       onClick={onMapClick}
-      {onLongPress}
       class={placementMode ? "placing-tree" : ""}
     />
 
