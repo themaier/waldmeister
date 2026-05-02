@@ -550,6 +550,15 @@ select {
 .home-shell--empty .home-map {
   height: calc(100dvh - 61px);
 }
+/* Tool/draw mode: scroll panel below the map is unmounted, so let the map
+   take the full remaining viewport. Otherwise the shell's `min-height: 100dvh`
+   leaves a bare strip of background where the panel used to be. */
+.home-shell--tool {
+  min-height: 0;
+}
+.home-shell--tool .home-map {
+  height: calc(100dvh - 61px);
+}
 .home-scroll {
   flex: 1 0 auto;
   background: var(--color-surface);

@@ -1066,7 +1066,11 @@
   });
 </script>
 
-<div class="home-shell" class:home-shell--empty={data.plots.length === 0}>
+<div
+  class="home-shell"
+  class:home-shell--empty={data.plots.length === 0}
+  class:home-shell--tool={routeDrawType !== null || areaDrawActive || placementMode}
+>
   <PlotSwitcher
     plots={data.plots}
     activeId={activePlotId}

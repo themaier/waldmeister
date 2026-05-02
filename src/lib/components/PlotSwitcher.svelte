@@ -37,6 +37,31 @@
   let { plots, activeId, onSwitch, toolActive = false, userName = '' }: Props =
     $props();
 
+  let accountOpen = $state(false);
+  let plusOpen = $state(false);
+  const anyOpen = $derived(accountOpen || plusOpen);
+
+  function closeAll() {
+    accountOpen = false;
+    plusOpen = false;
+  }
+  function toggleAccount() {
+    accountOpen = !accountOpen;
+    plusOpen = false;
+  }
+  function togglePlus() {
+    plusOpen = !plusOpen;
+    accountOpen = false;
+  }
+  function onWindowKeydown(e: KeyboardEvent) {
+    if (e.key === 'Escape' && anyOpen) closeAll();
+  }
+  function onWindowPointerDown(e: PointerEvent) {
+    if (!anyOpen) return;
+    const t = e.target as HTMLElement | null;
+    if (!t?.closest('[data-menu-host]')) closeAll();
+  }
+
   const activeIndex = $derived(plots.findIndex((p) => p.id === activeId));
   const hasMultiple = $derived(plots.length > 1);
   const activeName = $derived(
@@ -47,9 +72,6 @@
     plots.length > 0 && activeIndex >= 0
       ? `${activeIndex + 1}/${plots.length}`
       : ''
-  );
-  const initial = $derived(
-    (userName || '').trim().slice(0, 1).toUpperCase() || 'W'
   );
   const fromHref = $derived.by(() => `${page.url.pathname}${page.url.search}`);
   // Baum creation needs a plot context — disable when there isn't one.
@@ -75,54 +97,60 @@
   }
 </script>
 
+<svelte:window onkeydown={onWindowKeydown} onpointerdown={onWindowPointerDown} />
+
 <header
   class="sticky top-0 z-20 bg-surface/85 border-b backdrop-blur-md backdrop-saturate-150"
   style="padding-top: env(safe-area-inset-top);"
 >
   <div class="flex items-center gap-2 px-2 sm:px-3 py-2">
     <!-- Account / menu -->
-    <div class="dropdown flex-shrink-0">
+    <div class="relative flex-shrink-0" data-menu-host>
       <button
-        tabindex="0"
+        type="button"
+        onclick={toggleAccount}
         class="w-11 h-11 grid place-items-center rounded-btn bg-surface border text-ink hover:border-pine transition"
         aria-label="Konto"
+        aria-expanded={accountOpen}
+        aria-haspopup="menu"
       >
         <List size="1.25em" weight="bold" />
       </button>
-      <ul
-        role="menu"
-        tabindex="0"
-        class="dropdown-content mt-2 p-2 min-w-[220px] rounded-box bg-surface border shadow-canopy z-30 list-none flex flex-col gap-1"
-      >
-        <li
-          class="px-3 pt-2 pb-3 flex flex-col gap-[2px] border-b border-hairline mb-1 select-none"
+      {#if accountOpen}
+        <ul
+          role="menu"
+          class="absolute top-full left-0 mt-2 p-2 min-w-[220px] rounded-box bg-surface border shadow-canopy z-30 list-none flex flex-col gap-1"
         >
-          <span class="eyebrow">Angemeldet</span>
-          <span
-            class="font-serif font-medium text-[0.9375rem] text-ink truncate"
-            >{userName || 'Konto'}</span
+          <li
+            class="px-3 pt-2 pb-3 flex flex-col gap-[2px] border-b border-hairline mb-1 select-none"
           >
-        </li>
-        <li>
-          <a
-            href="/auftraege"
-            role="menuitem"
-            class="account-item flex items-center gap-2 px-3 py-2.5 rounded-btn text-sm text-content no-underline transition w-full"
-          >
-            <ClipboardText size="1.1em" /> Aufträge
-          </a>
-        </li>
-        <li class="mt-2 pt-2 border-t border-hairline">
-          <button
-            type="button"
-            onclick={logout}
-            role="menuitem"
-            class="account-item account-item-danger flex items-center gap-2 px-3 py-2.5 rounded-btn text-sm text-content w-full transition"
-          >
-            <SignOut size="1.1em" /> Abmelden
-          </button>
-        </li>
-      </ul>
+            <span class="eyebrow">Angemeldet</span>
+            <span
+              class="font-serif font-medium text-[0.9375rem] text-ink truncate"
+              >{userName || 'Konto'}</span
+            >
+          </li>
+          <li>
+            <a
+              href="/auftraege"
+              role="menuitem"
+              class="account-item flex items-center gap-2 px-3 py-2.5 rounded-btn text-sm text-content no-underline transition w-full"
+            >
+              <ClipboardText size="1.1em" /> Aufträge
+            </a>
+          </li>
+          <li class="mt-2 pt-2 border-t border-hairline">
+            <button
+              type="button"
+              onclick={logout}
+              role="menuitem"
+              class="account-item account-item-danger flex items-center gap-2 px-3 py-2.5 rounded-btn text-sm text-content w-full transition"
+            >
+              <SignOut size="1.1em" /> Abmelden
+            </button>
+          </li>
+        </ul>
+      {/if}
     </div>
 
     <span
@@ -185,80 +213,84 @@
     ></span>
 
     <!-- Create-new dropdown — three creation shortcuts behind one Plus. -->
-    <div class="dropdown dropdown-end flex-shrink-0">
+    <div class="relative flex-shrink-0" data-menu-host>
       <button
-        tabindex="0"
+        type="button"
+        onclick={togglePlus}
         class="w-11 h-11 grid place-items-center rounded-btn text-earth border shadow-duff transition hover:-translate-y-px hover:shadow-understory flex-shrink-0 p-0"
         style="background: linear-gradient(180deg, var(--color-pine), var(--color-pine-deep)); border-color: var(--color-pine-deep);"
         aria-label="Neu erstellen"
+        aria-expanded={plusOpen}
+        aria-haspopup="menu"
       >
         <Plus size="1.25em" weight="bold" />
       </button>
-      <ul
-        role="menu"
-        tabindex="0"
-        class="dropdown-content mt-2 p-2 min-w-[264px] rounded-box bg-surface border shadow-canopy z-30 flex flex-col gap-1 list-none"
-      >
-        <li>
-          <a
-            href="/waldstuecke/neu"
-            role="menuitem"
-            class="plus-item flex items-center gap-3 px-2 py-2.5 rounded-btn no-underline transition"
-          >
-            <span class="plus-item-tile">
-              <Tree size="1.35em" weight="regular" />
-            </span>
-            <span class="text-[0.9375rem] font-semibold text-ink leading-tight"
-              >Neues Waldstück</span
-            >
-          </a>
-        </li>
-        <li>
-          {#if baumHref}
+      {#if plusOpen}
+        <ul
+          role="menu"
+          class="absolute top-full right-0 mt-2 p-2 min-w-[264px] rounded-box bg-surface border shadow-canopy z-30 flex flex-col gap-1 list-none"
+        >
+          <li>
             <a
-              href={baumHref}
+              href="/waldstuecke/neu"
               role="menuitem"
               class="plus-item flex items-center gap-3 px-2 py-2.5 rounded-btn no-underline transition"
             >
               <span class="plus-item-tile">
-                <Crosshair size="1.35em" weight="regular" />
+                <Tree size="1.35em" weight="regular" />
               </span>
-              <span
-                class="text-[0.9375rem] font-semibold text-ink leading-tight"
-                >Neuer Baum</span
+              <span class="text-[0.9375rem] font-semibold text-ink leading-tight"
+                >Neues Waldstück</span
               >
             </a>
-          {:else}
-            <span
-              class="plus-item plus-item-disabled flex items-center gap-3 px-2 py-2.5 rounded-btn"
-              aria-disabled="true"
-              title="Zuerst ein Waldstück auswählen"
+          </li>
+          <li>
+            {#if baumHref}
+              <a
+                href={baumHref}
+                role="menuitem"
+                class="plus-item flex items-center gap-3 px-2 py-2.5 rounded-btn no-underline transition"
+              >
+                <span class="plus-item-tile">
+                  <Crosshair size="1.35em" weight="regular" />
+                </span>
+                <span
+                  class="text-[0.9375rem] font-semibold text-ink leading-tight"
+                  >Neuer Baum</span
+                >
+              </a>
+            {:else}
+              <span
+                class="plus-item plus-item-disabled flex items-center gap-3 px-2 py-2.5 rounded-btn"
+                aria-disabled="true"
+                title="Zuerst ein Waldstück auswählen"
+              >
+                <span class="plus-item-tile">
+                  <Crosshair size="1.35em" weight="regular" />
+                </span>
+                <span
+                  class="text-[0.9375rem] font-semibold text-content-muted leading-tight"
+                  >Neuer Baum</span
+                >
+              </span>
+            {/if}
+          </li>
+          <li>
+            <a
+              href={`/auftraege/neu?from=${encodeURIComponent(fromHref)}`}
+              role="menuitem"
+              class="plus-item flex items-center gap-3 px-2 py-2.5 rounded-btn no-underline transition"
             >
               <span class="plus-item-tile">
-                <Crosshair size="1.35em" weight="regular" />
+                <ClipboardText size="1.35em" weight="regular" />
               </span>
-              <span
-                class="text-[0.9375rem] font-semibold text-content-muted leading-tight"
-                >Neuer Baum</span
+              <span class="text-[0.9375rem] font-semibold text-ink leading-tight"
+                >Neuer Auftrag</span
               >
-            </span>
-          {/if}
-        </li>
-        <li>
-          <a
-            href={`/auftraege/neu?from=${encodeURIComponent(fromHref)}`}
-            role="menuitem"
-            class="plus-item flex items-center gap-3 px-2 py-2.5 rounded-btn no-underline transition"
-          >
-            <span class="plus-item-tile">
-              <ClipboardText size="1.35em" weight="regular" />
-            </span>
-            <span class="text-[0.9375rem] font-semibold text-ink leading-tight"
-              >Neuer Auftrag</span
-            >
-          </a>
-        </li>
-      </ul>
+            </a>
+          </li>
+        </ul>
+      {/if}
     </div>
 
   </div>

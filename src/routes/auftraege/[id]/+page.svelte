@@ -17,6 +17,16 @@
 
   let copied = $state(false);
   let auftragMapRef = $state<{ fitForestView: () => void } | null>(null);
+  let priorityOpen = $state(false);
+
+  function onWindowKeydown(e: KeyboardEvent) {
+    if (e.key === 'Escape' && priorityOpen) priorityOpen = false;
+  }
+  function onWindowPointerDown(e: PointerEvent) {
+    if (!priorityOpen) return;
+    const t = e.target as HTMLElement | null;
+    if (!t?.closest('[data-menu-host]')) priorityOpen = false;
+  }
 
   const taskMapTrees = $derived(
     data.trees.map((t) => ({
@@ -76,6 +86,8 @@
     urgent: 'priority-chip--urgent'
   } as const;
 </script>
+
+<svelte:window onkeydown={onWindowKeydown} onpointerdown={onWindowPointerDown} />
 
 <div class="min-h-dvh bg-earth pb-14">
   <header class="sticky top-0 z-10 bg-earth/90 backdrop-blur-md backdrop-saturate-150">
@@ -138,10 +150,13 @@
       <progress class="progress w-full" value={progress} max="100"></progress>
 
       <div class="flex justify-end">
-        <div class="dropdown dropdown-end">
+        <div class="relative" data-menu-host>
           <button
-            tabindex="0"
+            type="button"
+            onclick={() => (priorityOpen = !priorityOpen)}
             class="inline-flex items-center gap-2 px-3 py-2 min-h-[40px] rounded-btn bg-earth border text-ink text-[0.8125rem] cursor-pointer"
+            aria-expanded={priorityOpen}
+            aria-haspopup="menu"
           >
             <span class="eyebrow">Priorität</span>
             <span class="priority-chip {priorityClass[data.order.effectivePriority]}">
@@ -152,30 +167,38 @@
             </span>
             <CaretDown size="0.875em" />
           </button>
-          <ul
-            tabindex="0"
-            class="dropdown-content menu bg-surface border rounded-box p-2 min-w-[220px] shadow-canopy z-30"
-          >
-            {#each PRIORITIES as p}
+          {#if priorityOpen}
+            <ul
+              role="menu"
+              class="absolute top-full right-0 mt-2 bg-surface border rounded-box p-2 min-w-[220px] shadow-canopy z-30 list-none"
+            >
+              {#each PRIORITIES as p}
+                <li>
+                  <button
+                    class="block w-full text-left px-3 py-2 rounded-btn text-sm text-content hover:bg-surface-muted hover:text-ink"
+                    onclick={() => {
+                      priorityOpen = false;
+                      setPriority(p);
+                    }}
+                  >
+                    {PRIORITY_LABELS[p]}
+                  </button>
+                </li>
+              {/each}
+              <li><hr class="border-0 h-px bg-hairline my-1" /></li>
               <li>
                 <button
                   class="block w-full text-left px-3 py-2 rounded-btn text-sm text-content hover:bg-surface-muted hover:text-ink"
-                  onclick={() => setPriority(p)}
+                  onclick={() => {
+                    priorityOpen = false;
+                    setPriority(null);
+                  }}
                 >
-                  {PRIORITY_LABELS[p]}
+                  Auto verwenden
                 </button>
               </li>
-            {/each}
-            <li><hr class="border-0 h-px bg-hairline my-1" /></li>
-            <li>
-              <button
-                class="block w-full text-left px-3 py-2 rounded-btn text-sm text-content hover:bg-surface-muted hover:text-ink"
-                onclick={() => setPriority(null)}
-              >
-                Auto verwenden
-              </button>
-            </li>
-          </ul>
+            </ul>
+          {/if}
         </div>
       </div>
     </section>
