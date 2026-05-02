@@ -741,20 +741,20 @@
       </div>
 
       <div class="grid grid-cols-2 gap-3">
-        <label class="flex flex-col gap-2">
+        <label class="flex min-w-0 flex-col gap-2">
           <span class="text-[0.8125rem] font-semibold text-content">Pflanzjahr</span>
           <input
             type="date"
-            class="w-full px-4 py-3 min-h-[48px] rounded-btn border bg-earth text-[0.9375rem] text-ink focus:outline-none focus:border-pine focus:shadow-ring-focus transition"
+            class="date-input w-full min-w-0 box-border h-12 px-4 py-0 rounded-btn border bg-earth text-[0.9375rem] text-ink focus:outline-none focus:border-pine focus:shadow-ring-focus transition"
             bind:value={() => estPlantedAt, setPlantedAt}
           />
         </label>
-        <label class="flex flex-col gap-2">
+        <label class="flex min-w-0 flex-col gap-2">
           <span class="text-[0.8125rem] font-semibold text-content">oder Alter (Jahre)</span>
           <input
             type="number"
             min="0"
-            class="w-full px-4 py-3 min-h-[48px] rounded-btn border bg-earth text-[0.9375rem] text-ink focus:outline-none focus:border-pine focus:shadow-ring-focus transition"
+            class="w-full min-w-0 box-border h-12 px-4 py-0 rounded-btn border bg-earth text-[0.9375rem] text-ink focus:outline-none focus:border-pine focus:shadow-ring-focus transition"
             bind:value={() => estPlantedAge, setPlantedAge}
           />
         </label>
@@ -791,5 +791,20 @@
     to {
       transform: rotate(360deg);
     }
+  }
+  /* iOS Safari renders type=date taller than other inputs and lays its
+     internal placeholder out with extra leading, which can spill past the
+     grid cell and visually overlap the sibling. Strip the native chrome,
+     then size and align it ourselves so it matches the number input. */
+  .date-input {
+    -webkit-appearance: none;
+    appearance: none;
+    line-height: 1;
+    display: flex;
+    align-items: center;
+  }
+  .date-input::-webkit-date-and-time-value {
+    text-align: left;
+    min-height: 1em;
   }
 </style>

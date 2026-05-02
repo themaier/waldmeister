@@ -1,3 +1,17 @@
+// Vite's SSR build of @better-auth/core picks the `pure` AsyncLocalStorage
+// polyfill (a single shared `#current` field) instead of the real
+// `node:async_hooks` one. The polyfill is racy across concurrent requests and
+// drops the store between awaits, which surfaces as "No request state found.
+// Please make sure you are calling this function within a `runWithRequestState`
+// callback." on any auth.api.* call. The polyfill module itself does
+// `if ("AsyncLocalStorage" in globalThis) return globalThis.AsyncLocalStorage`
+// at first use, so seeding globalThis here (before that microtask runs) makes
+// it pick up the real one. This file is the SSR entry, so the assignment
+// happens before any auth code can be hit by an incoming request.
+import { AsyncLocalStorage } from 'node:async_hooks';
+// @ts-expect-error - augmenting globalThis for the better-auth polyfill
+globalThis.AsyncLocalStorage ??= AsyncLocalStorage;
+
 import { redirect, type Handle } from '@sveltejs/kit';
 import { building } from '$app/environment';
 import { auth } from '$lib/server/auth';
